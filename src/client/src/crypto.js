@@ -66,12 +66,12 @@ export async function generateKeypair() {
 }
 
 /**
- * Derive an AES-GCM `Session` from your private key and the peer's public key
+ * Derive an AES-GCM `Session` via ECDH between your private key and the other side's public key
  * @param {Uint8Array} privateKey PKCS8 DER
- * @param {Uint8Array} peerPublicKey Raw uncompressed SEC1 (65 bytes)
+ * @param {Uint8Array} publicKey Raw uncompressed SEC1 (65 bytes)
  * @returns {Promise<Session>}
  */
-export async function deriveSession(privateKey, peerPublicKey) {
+export async function deriveSession(privateKey, publicKey) {
 	const priv = await crypto.subtle.importKey(
 		"pkcs8",
 		/** @type {BufferSource} */ (privateKey),
@@ -81,7 +81,7 @@ export async function deriveSession(privateKey, peerPublicKey) {
 	);
 	const pub = await crypto.subtle.importKey(
 		"raw",
-		/** @type {BufferSource} */ (peerPublicKey),
+		/** @type {BufferSource} */ (publicKey),
 		{ name: "ECDH", namedCurve: "P-256" },
 		false,
 		[]

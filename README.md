@@ -90,7 +90,7 @@ Returned by `deriveSession`. Provides AES-256-GCM encryption for use cases outsi
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `generateKeypair` | — | `Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>` | Generate a fresh P-256 keypair. `publicKey` is raw uncompressed SEC1 (65 bytes). `privateKey` is PKCS8 DER. |
-| `deriveSession` | `privateKey: Uint8Array`, `peerPublicKey: Uint8Array` | `Promise<Session>` | Perform ECDH between the two keys, run HKDF-SHA256, and return a `Session` bound to the derived AES key. `privateKey` is PKCS8 DER, `peerPublicKey` is raw uncompressed SEC1. |
+| `deriveSession` | `privateKey: Uint8Array`, `publicKey: Uint8Array` | `Promise<Session>` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. `privateKey` is PKCS8 DER, `publicKey` is raw uncompressed SEC1. |
 
 ### Constants
 
@@ -167,9 +167,8 @@ Returned by `SessionFromKey`. Provides AES-256-GCM encryption for use cases outs
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `GenerateKeypair` | — | `(*Keypair, error)` | Generate a fresh P-256 keypair (raw bytes). |
-| `DeriveSharedSecret` | `privateKey, peerPublicKey []byte` | `([]byte, error)` | ECDH followed by HKDF-SHA256. Returns a 32-byte AES key. |
+| `DeriveSharedSecret` | `privateKey, publicKey []byte` | `([]byte, error)` | ECDH followed by HKDF-SHA256. Returns a 32-byte AES key. |
 | `SessionFromKey` | `key []byte` | `(*Session, error)` | Construct an AES-GCM session from a 32-byte key. |
-| `ComputeAAD` | `msgType, originID, targetID string` | `[]byte` | Returns `SHA256(msgType \| "\|" \| originID \| "\|" \| targetID)`. Matches the AAD used internally by the client. |
 
 ### Constants
 

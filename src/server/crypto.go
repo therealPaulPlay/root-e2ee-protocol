@@ -42,17 +42,17 @@ func GenerateKeypair() (*Keypair, error) {
 	}, nil
 }
 
-// DeriveSharedSecret performs P-256 ECDH and runs HKDF-SHA256 over the result
-// to produce a 32-byte AES key
-func DeriveSharedSecret(yourPrivateKey, theirPublicKey []byte) ([]byte, error) {
+// DeriveSharedSecret performs P-256 ECDH between your private key and the other side's
+// public key, then runs HKDF-SHA256 over the result to produce a 32-byte AES key
+func DeriveSharedSecret(privateKey, publicKey []byte) ([]byte, error) {
 	curve := ecdh.P256()
 
-	priv, err := curve.NewPrivateKey(yourPrivateKey)
+	priv, err := curve.NewPrivateKey(privateKey)
 	if err != nil {
 		return nil, fmt.Errorf("invalid private key: %w", err)
 	}
 
-	pub, err := curve.NewPublicKey(theirPublicKey)
+	pub, err := curve.NewPublicKey(publicKey)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public key: %w", err)
 	}
@@ -111,8 +111,8 @@ func (s *Session) Decrypt(ciphertext, aad []byte) ([]byte, error) {
 	return s.gcm.Open(nil, nonce, body, aad)
 }
 
-// ComputeAAD binds envelope metadata to the ciphertext: SHA256(type|originId|targetId)
-func ComputeAAD(msgType, originID, targetID string) []byte {
+// computeAAD binds envelope metadata to the ciphertext: SHA256(type|originId|targetId)
+func computeAAD(msgType, originID, targetID string) []byte {
 	h := sha256.Sum256([]byte(msgType + "|" + originID + "|" + targetID))
 	return h[:]
 }

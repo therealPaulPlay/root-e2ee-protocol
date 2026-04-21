@@ -21,6 +21,7 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
 	"flag"
@@ -225,7 +226,8 @@ func pushWithKey(w io.Writer, selfID, clientID, msgType string, payload any, pri
 	if err != nil {
 		return err
 	}
-	aad := rp.ComputeAAD(msgType, selfID, clientID)
+	aadHash := sha256.Sum256([]byte(msgType + "|" + selfID + "|" + clientID))
+	aad := aadHash[:]
 	ciphertext, err := session.Encrypt(payloadCBOR, aad)
 	if err != nil {
 		return err

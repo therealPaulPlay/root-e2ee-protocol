@@ -118,9 +118,9 @@ func TestSessionEmptyPlaintext(t *testing.T) {
 }
 
 func TestComputeAAD(t *testing.T) {
-	a := ComputeAAD("type", "from", "to")
-	b := ComputeAAD("type", "from", "to")
-	c := ComputeAAD("type", "from", "TO")
+	a := computeAAD("type", "from", "to")
+	b := computeAAD("type", "from", "to")
+	c := computeAAD("type", "from", "TO")
 	if !bytes.Equal(a, b) {
 		t.Error("AAD should be deterministic for equal inputs")
 	}

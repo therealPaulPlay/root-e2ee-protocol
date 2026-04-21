@@ -24,7 +24,7 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
 	}
 
-	aad := ComputeAAD(env.Type, env.OriginID, env.TargetID)
+	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
 	plaintext, err := oldSession.Decrypt(env.Payload, aad)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrDecryptionFailed)
@@ -64,7 +64,7 @@ func (s *Server) handleRenewKeyAck(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
 	}
 
-	aad := ComputeAAD(env.Type, env.OriginID, env.TargetID)
+	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
 	plaintext, err := pending.session.Decrypt(env.Payload, aad)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrDecryptionFailed)
@@ -77,7 +77,7 @@ func (s *Server) handleRenewKeyAck(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInvalidPayload)
 	}
 
-	if err := s.keyStore.CommitClientPublicKey(env.OriginID, pending.peerPublicKey); err != nil {
+	if err := s.keyStore.CommitClientPublicKey(env.OriginID, pending.clientPublicKey); err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
 	}
 

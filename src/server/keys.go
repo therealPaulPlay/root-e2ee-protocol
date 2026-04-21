@@ -11,12 +11,12 @@ const keyCleanupInterval = 15 * time.Second
 
 // pendingKey is a new key the client proposed but hasn't ACKed yet
 type pendingKey struct {
-	peerPublicKey []byte
-	session       *Session
-	createdAt     time.Time
+	clientPublicKey []byte
+	session         *Session
+	createdAt       time.Time
 }
 
-// keyManager tracks per-peer pending keys with a TTL-based cleanup
+// keyManager tracks per-client pending keys with a TTL-based cleanup
 type keyManager struct {
 	mu      sync.Mutex
 	pending map[string]*pendingKey
@@ -54,30 +54,30 @@ func (m *keyManager) cleanup() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := time.Now()
-	for peerID, p := range m.pending {
+	for clientID, p := range m.pending {
 		if now.Sub(p.createdAt) > pendingKeyTTL {
-			delete(m.pending, peerID)
+			delete(m.pending, clientID)
 		}
 	}
 }
 
-func (m *keyManager) bufferPending(peerID string, peerPublicKey []byte, session *Session) {
+func (m *keyManager) bufferPending(clientID string, clientPublicKey []byte, session *Session) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.pending[peerID] = &pendingKey{
-		peerPublicKey: peerPublicKey,
-		session:       session,
-		createdAt:     time.Now(),
+	m.pending[clientID] = &pendingKey{
+		clientPublicKey: clientPublicKey,
+		session:         session,
+		createdAt:       time.Now(),
 	}
 }
 
-func (m *keyManager) takePending(peerID string) (*pendingKey, bool) {
+func (m *keyManager) takePending(clientID string) (*pendingKey, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	p, ok := m.pending[peerID]
+	p, ok := m.pending[clientID]
 	if !ok {
 		return nil, false
 	}
-	delete(m.pending, peerID)
+	delete(m.pending, clientID)
 	return p, true
 }

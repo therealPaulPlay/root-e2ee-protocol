@@ -1,0 +1,19 @@
+# Node
+node_modules/
+dist/
+coverage/
+*.log
+.vitest-cache/
+
+# Editor / OS
+.DS_Store
+.vscode/
+.idea/
+
+# Go
+*.test
+*.out
+vendor/
+
+# TypeScript (JSDoc-only typecheck)
+tsconfig.tsbuildinfo

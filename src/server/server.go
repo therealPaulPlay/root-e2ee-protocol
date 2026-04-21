@@ -111,9 +111,9 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	}
 
 	switch env.Type {
-	case MsgRenewKey:
+	case msgRenewKey:
 		return write(env.OriginID, s.handleRenewKey(env))
-	case MsgRenewKeyAck:
+	case msgRenewKeyAck:
 		return write(env.OriginID, s.handleRenewKeyAck(env))
 	}
 
@@ -144,7 +144,7 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	if err != nil {
 		return fmt.Errorf("marshal reply payload: %w", err)
 	}
-	reply, err := s.buildEncryptedReply(env.OriginID, env.Type+ResultSuffix, replyBytes, env.RequestID, session)
+	reply, err := s.buildEncryptedReply(env.OriginID, env.Type+resultSuffix, replyBytes, env.RequestID, session)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 // Push encrypts and sends a message not triggered by an incoming request
 // RequestID on the wire is empty; clients distinguish pushes from replies by that
 func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) error {
-	for _, t := range ReservedTypes {
+	for _, t := range reservedTypes {
 		if msgType == t {
 			return fmt.Errorf("reserved message type: %s", msgType)
 		}
@@ -243,7 +243,7 @@ func (s *Server) buildEncryptedReply(clientID, msgType string, payload []byte, r
 // buildProtocolError produces a plaintext envelope carrying a library-owned error code
 func (s *Server) buildProtocolError(clientID, requestID, requestType, code string) []byte {
 	out, _ := marshalEnvelope(envelope{
-		Type:      requestType + ResultSuffix,
+		Type:      requestType + resultSuffix,
 		OriginID:  s.selfID,
 		TargetID:  clientID,
 		RequestID: requestID,

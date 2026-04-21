@@ -2,16 +2,15 @@ package rootproto
 
 // Reserved message types owned by the key renewal protocol
 const (
-	MsgRenewKey    = "renewKey"
-	MsgRenewKeyAck = "renewKeyAck"
+	msgRenewKey    = "renewKey"
+	msgRenewKeyAck = "renewKeyAck"
 )
 
-// ReservedTypes lists all types the kernel handles internally
-var ReservedTypes = []string{MsgRenewKey, MsgRenewKeyAck}
+// Types the kernel handles internally, hosts must not send these via Push
+var reservedTypes = []string{msgRenewKey, msgRenewKeyAck}
 
-// Response type suffix convention
-// A request of type X gets a response of type X + ResultSuffix
-const ResultSuffix = "Result"
+// A request of type X gets a response of type X + resultSuffix
+const resultSuffix = "Result"
 
 // Canonical error codes emitted by the library
 const (

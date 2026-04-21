@@ -1,6 +1,6 @@
 # ROOT (Protocol)
 
-End-to-end encrypted communication protocol with two parts: A JS client, and a Go server. Uses CBOR for serialization and comes with a built-in key-renewal system for forward secrecy.
+End-to-end encrypted communication protocol with two parts: A JS client package, and a Go server package. Uses CBOR for serialization and comes with a built-in key-renewal system for forward secrecy.
 
 ## Install
 
@@ -96,7 +96,6 @@ Returned by `deriveSession`. Provides AES-256-GCM encryption for use cases outsi
 
 | Name | Value | Description |
 |---|---|---|
-| `RESERVED_TYPES` | `["renewKey", "renewKeyAck"]` | Message types owned by the library. Calling `request` with one of these throws. |
 | `ERR_DECRYPTION_FAILED` | `"DECRYPTION_FAILED"` | Canonical code used when decryption fails. Compare `DecodedMessage.error` against this. |
 
 ## Go server
@@ -176,12 +175,8 @@ Returned by `SessionFromKey`. Provides AES-256-GCM encryption for use cases outs
 
 | Name | Value | Description |
 |---|---|---|
-| `ReservedTypes` | `[]string{"renewKey", "renewKeyAck"}` | Message types owned by the library. `Push` rejects any attempt to use them. |
-| `ResultSuffix` | `"Result"` | Appended to a request type to form the reply type. |
-| `MsgRenewKey` | `"renewKey"` | Reserved type. |
-| `MsgRenewKeyAck` | `"renewKeyAck"` | Reserved type. |
 | `ErrDecryptionFailed` | `"DECRYPTION_FAILED"` | Set on an error envelope when the server cannot decrypt a received message. |
-| `ErrDeviceNotPaired` | `"DEVICE_NOT_PAIRED"` | Set when `GetClientPublicKey` returns `(nil, false)`. |
+| `ErrNoClientKey` | `"NO_CLIENT_KEY"` | Set when `GetClientPublicKey` returns `(nil, false)`. |
 | `ErrInvalidKey` | `"INVALID_KEY"` | Set when key parsing or ECDH derivation fails on the server side. |
 | `ErrInvalidPayload` | `"INVALID_PAYLOAD"` | Set when a reserved-type payload cannot be decoded. |
 | `ErrInternalError` | `"INTERNAL_ERROR"` | Catch-all for server-side failures that should not happen. |

@@ -260,4 +260,10 @@ describe("e2e cross-language", () => {
 		expect(followUp.error).toBeNull();
 		expect(followUp.payload).toEqual({ after: true });
 	});
+
+	test("rejects requests with reserved message types", async () => {
+		h = await spawnHarness();
+		await expect(h.client.request("server-1", "renewKey", {}, h.write)).rejects.toThrow(/Reserved/);
+		await expect(h.client.request("server-1", "renewKeyAck", {}, h.write)).rejects.toThrow(/Reserved/);
+	});
 });

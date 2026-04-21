@@ -16,7 +16,7 @@ const ResultSuffix = "Result"
 // Canonical error codes emitted by the library
 const (
 	ErrDecryptionFailed = "DECRYPTION_FAILED"
-	ErrDeviceNotPaired  = "DEVICE_NOT_PAIRED"
+	ErrNoClientKey      = "NO_CLIENT_KEY"
 	ErrInvalidKey       = "INVALID_KEY"
 	ErrInvalidPayload   = "INVALID_PAYLOAD"
 	ErrInternalError    = "INTERNAL_ERROR"

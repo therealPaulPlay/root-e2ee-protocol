@@ -188,7 +188,7 @@ func (s *Server) sessionFor(clientID, msgTypeForError, requestID string) (*Sessi
 
 	clientPub, ok := s.keyStore.GetClientPublicKey(clientID)
 	if !ok {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, ErrDeviceNotPaired)
+		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, ErrNoClientKey)
 	}
 	priv, err := s.keyStore.GetPrivateKey()
 	if err != nil {

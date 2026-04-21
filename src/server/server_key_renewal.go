@@ -8,7 +8,7 @@ import "github.com/fxamacker/cbor/v2"
 func (s *Server) handleRenewKey(env envelope) []byte {
 	clientPub, ok := s.keyStore.GetClientPublicKey(env.OriginID)
 	if !ok {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrDeviceNotPaired)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrNoClientKey)
 	}
 	priv, err := s.keyStore.GetPrivateKey()
 	if err != nil {

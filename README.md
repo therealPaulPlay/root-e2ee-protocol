@@ -132,7 +132,7 @@ Parameter function types:
 | Field | Signature | Expected behavior |
 |---|---|---|
 | `GetPrivateKey` | `func() ([]byte, error)` | Return the server's long-lived private key. One key is shared across all clients. |
-| `GetClientPublicKey` | `func(clientID string) ([]byte, bool)` | Return the current public key for the named client. Return `(nil, false)` if the client is unknown — the library replies with `DEVICE_NOT_PAIRED`. |
+| `GetClientPublicKey` | `func(clientID string) ([]byte, bool)` | Return the current public key for the named client. Return `(nil, false)` if the client is unknown. |
 | `CommitClientPublicKey` | `func(clientID string, newPublicKey []byte) error` | Persist a client's new public key. Called by the library when a `renewKeyAck` validates successfully. |
 
 ### Struct: `IncomingMessage`

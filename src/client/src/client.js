@@ -164,8 +164,9 @@ export class Client {
 	async #ensureKeyFresh(serverId, write) {
 		const current = await this.#keyStore.getCurrent(serverId);
 		if (!current) return; // No key — request() will fail when deriving the session
-		if (Date.now() - current.createdAt < this.#keyMaxAgeMs) return;
+		if (Date.now() - current.createdAt < this.#keyMaxAgeMs) return; // Key still fresh
 
+		// If not already renewing, start renewal
 		if (!this.#renewalPromises.has(serverId)) {
 			this.#renewalPromises.set(
 				serverId,
@@ -192,20 +193,21 @@ export class Client {
 		);
 		if (renewReply.error) throw new Error(`renewKey failed: ${renewReply.error}`);
 
-		// Commit: current becomes previous, new becomes current
+		// Step 2: current key becomes previous, new becomes current
 		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey, current.serverPublicKey);
 		this.#sessions.delete(serverId);
 
-		// Step 2: ACK encrypted with NEW session. Non-fatal if the reply is lost;
-		// server reconciles by keeping the pending key in its grace window
+		// Step 3: ACK encrypted with NEW session. Non-fatal if the reply is lost;
+		// client keeps the previous key stored, and reverts to it on mismatch
 		try {
 			await this.#exchange(serverId, "renewKeyAck", { ack: true }, write, false);
 		} catch { }
 	}
 
 	/**
-	 * Encrypt, send, await the reply. If retryOnServerDecryptionFailure is true and the server
-	 * reports DECRYPTION_FAILED, reverts to the previous key and runs one additional exchange
+	 * Encrypt, send, await the reply
+	 * If retryOnServerDecryptionFailure is true and the server reports DECRYPTION_FAILED,
+	 * reverts to the previous key and runs one additional exchange
 	 *
 	 * @param {string} serverId
 	 * @param {string} type
@@ -218,6 +220,7 @@ export class Client {
 		const reply = await this.#roundtrip(serverId, type, payload, write);
 		if (!retryOnServerDecryptionFailure || reply.error !== ERR_DECRYPTION_FAILED) return reply;
 
+		// Retry with previous encryption if available
 		const prev = await this.#keyStore.getPrevious(serverId);
 		if (!prev) return reply;
 

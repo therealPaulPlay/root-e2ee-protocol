@@ -113,8 +113,8 @@ Constructor: `NewServer(selfID string, keyStore KeyStore) *Server`.
 | `Push` | `clientID, msgType string`, `payload any`, `write WriteFn` | `error` | Server-initiated push to a specific client. Payload is any CBOR-serializable value. |
 | `OnRequest` | `msgType string`, `handler RequestHandler` | — | Register the handler for a client-request type. Only one handler per type; calling this twice for the same type replaces the prior handler. |
 | `OffRequest` | `msgType string` | — | Unregister the handler for a type. |
-| `OnError` | `handler ErrorHandler` | — | Register an error handler. Multiple handlers are supported and fire in registration order. |
-| `OffError` | `handler ErrorHandler` | — | Unregister a previously-added error handler (compared by function pointer identity). |
+| `OnError` | `handler ErrorHandler` | `uint64` | Register an error handler. Returns an ID used to unregister. Multiple handlers are supported and fire in registration order. |
+| `OffError` | `id uint64` | — | Unregister a previously-added error handler by its ID. |
 
 Parameter function types:
 
@@ -180,6 +180,7 @@ Returned by `SessionFromKey`. Provides AES-256-GCM encryption for use cases outs
 | `ErrInvalidPayload` | `"INVALID_PAYLOAD"` | Set when a reserved-type payload cannot be decoded. |
 | `ErrInternalError` | `"INTERNAL_ERROR"` | Catch-all for server-side failures that should not happen. |
 | `ErrUnknownType` | `"UNKNOWN_TYPE"` | Set when no handler is registered for the requested type. |
+| `ErrReplay` | `"REPLAY"` | Set when a request's `requestId` was already seen within the server's replay cache. |
 
 ## Tests
 

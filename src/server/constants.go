@@ -20,4 +20,5 @@ const (
 	ErrInvalidPayload   = "INVALID_PAYLOAD"
 	ErrInternalError    = "INTERNAL_ERROR"
 	ErrUnknownType      = "UNKNOWN_TYPE"
+	ErrReplay           = "REPLAY"
 )

@@ -266,4 +266,30 @@ describe("e2e cross-language", () => {
 		await expect(h.client.request("server-1", "renewKey", {}, h.write)).rejects.toThrow(/Reserved/);
 		await expect(h.client.request("server-1", "renewKeyAck", {}, h.write)).rejects.toThrow(/Reserved/);
 	});
+
+	test("rejects replayed request envelopes with REPLAY", async () => {
+		const harness = await spawnHarness();
+		h = harness;
+
+		/** @type {Uint8Array | null} */
+		let captured = null;
+		const capturingWrite = (/** @type {Uint8Array} */ bytes) => {
+			if (captured === null) captured = bytes;
+			harness.write(bytes);
+		};
+
+		const first = await harness.client.request("server-1", "echo", { once: true }, capturingWrite);
+		expect(first.error).toBeNull();
+
+		// Replayed envelope routes to onError because its requestId no longer matches a pending request
+		/** @type {(error: string) => void} */
+		let resolveError = () => { };
+		const errorReceived = new Promise((/** @type {(value: string) => void} */ resolve) => { resolveError = resolve; });
+		harness.client.onError((msg) => { if (msg.error) resolveError(msg.error); });
+
+		if (!captured) throw new Error("write was not captured");
+		harness.write(captured);
+
+		expect(await errorReceived).toBe("REPLAY");
+	});
 });

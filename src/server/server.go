@@ -2,6 +2,7 @@ package rootproto
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"github.com/fxamacker/cbor/v2"
@@ -33,17 +34,24 @@ type RequestHandler func(msg IncomingMessage) (replyPayload any)
 // ErrorHandler is called for protocol-level errors on inbound messages
 type ErrorHandler func(msg IncomingMessage, err error)
 
+type registeredErrorHandler struct {
+	id      uint64
+	handler ErrorHandler
+}
+
 type Server struct {
 	selfID   string
 	keyStore KeyStore
 	keys     *keyManager
+	replay   *replayCache
 
 	sessionMu sync.Mutex
 	sessions  map[string]*Session
 
-	handlerMu       sync.RWMutex
-	requestHandlers map[string]RequestHandler
-	errorHandlers   []ErrorHandler
+	handlerMu        sync.RWMutex
+	requestHandlers  map[string]RequestHandler
+	errorHandlers    []registeredErrorHandler
+	nextErrHandlerID uint64
 }
 
 // NewServer constructs a server
@@ -53,6 +61,7 @@ func NewServer(selfID string, keyStore KeyStore) *Server {
 		selfID:          selfID,
 		keyStore:        keyStore,
 		keys:            newKeyManager(),
+		replay:          newReplayCache(),
 		sessions:        make(map[string]*Session),
 		requestHandlers: make(map[string]RequestHandler),
 	}
@@ -80,21 +89,23 @@ func (s *Server) OffRequest(msgType string) {
 }
 
 // OnError registers a handler for protocol-level errors on inbound messages
+// Returns an ID the host passes to OffError to unregister the handler
 // Multiple handlers are supported and fire in registration order
-func (s *Server) OnError(handler ErrorHandler) {
+func (s *Server) OnError(handler ErrorHandler) uint64 {
 	s.handlerMu.Lock()
 	defer s.handlerMu.Unlock()
-	s.errorHandlers = append(s.errorHandlers, handler)
+	s.nextErrHandlerID++
+	id := s.nextErrHandlerID
+	s.errorHandlers = append(s.errorHandlers, registeredErrorHandler{id, handler})
+	return id
 }
 
-// OffError unregisters a previously-added error handler
-// Compared by function pointer identity
-func (s *Server) OffError(handler ErrorHandler) {
+// OffError unregisters a previously-added error handler by its ID
+func (s *Server) OffError(id uint64) {
 	s.handlerMu.Lock()
 	defer s.handlerMu.Unlock()
-	target := fmt.Sprintf("%p", handler)
 	for i, h := range s.errorHandlers {
-		if fmt.Sprintf("%p", h) == target {
+		if h.id == id {
 			s.errorHandlers = append(s.errorHandlers[:i], s.errorHandlers[i+1:]...)
 			return
 		}
@@ -129,6 +140,11 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrDecryptionFailed))
 	}
 
+	// Reject replays: an authenticated ciphertext with a requestId we've already seen
+	if env.RequestID != "" && s.replay.check(env.RequestID) {
+		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrReplay))
+	}
+
 	msg := IncomingMessage{Type: env.Type, ClientID: env.OriginID, Payload: plaintext}
 
 	s.handlerMu.RLock()
@@ -154,10 +170,8 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 // Push encrypts and sends a message not triggered by an incoming request
 // RequestID on the wire is empty; clients distinguish pushes from replies by that
 func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) error {
-	for _, t := range reservedTypes {
-		if msgType == t {
-			return fmt.Errorf("reserved message type: %s", msgType)
-		}
+	if slices.Contains(reservedTypes, msgType) {
+		return fmt.Errorf("reserved message type: %s", msgType)
 	}
 
 	session, errReply := s.sessionFor(clientID, msgType, "")
@@ -214,12 +228,12 @@ func (s *Server) invalidateSession(clientID string) {
 
 func (s *Server) invokeError(msg IncomingMessage, err error) {
 	s.handlerMu.RLock()
-	// Copy so we release the lock before calling user code
-	handlers := make([]ErrorHandler, len(s.errorHandlers))
-	copy(handlers, s.errorHandlers)
+	// Snapshot so we release the lock before calling user code
+	snapshot := make([]registeredErrorHandler, len(s.errorHandlers))
+	copy(snapshot, s.errorHandlers)
 	s.handlerMu.RUnlock()
-	for _, h := range handlers {
-		h(msg, err)
+	for _, h := range snapshot {
+		h.handler(msg, err)
 	}
 }
 

@@ -122,7 +122,7 @@ Returned by `GenerateKeypair`.
 
 ### Struct: `Session`
 
-Returned by `SessionFromKey`. Provides AES-256-GCM encryption for use cases outside the request/response flow.
+Provides AES-256-GCM encryption for use cases outside the request/response flow.
 
 | Method | Parameters | Returns | Description |
 |---|---|---|---|
@@ -134,7 +134,7 @@ Returned by `SessionFromKey`. Provides AES-256-GCM encryption for use cases outs
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `GenerateKeypair` | — | `(*Keypair, error)` | Generate a fresh P-256 keypair (raw bytes). |
-| `DeriveSharedSecret` | `privateKey, publicKey []byte` | `([]byte, error)` | ECDH followed by HKDF-SHA256. Returns a 32-byte AES key. |
+| `DeriveSession` | `privateKey, publicKey []byte` | `(*Session, error)` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. |
 | `SessionFromKey` | `key []byte` | `(*Session, error)` | Construct an AES-GCM session from a 32-byte key. |
 
 ## Tests

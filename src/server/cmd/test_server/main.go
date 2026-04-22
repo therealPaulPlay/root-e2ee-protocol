@@ -210,11 +210,7 @@ func writeFrame(w io.Writer, payload []byte) error {
 // Bypasses the server's session cache on purpose: the test uses this to deliver a push
 // encrypted under a session that has already been retired by a subsequent key renewal
 func pushWithKey(w io.Writer, selfID, clientID, msgType string, payload any, privKey, clientPub []byte) error {
-	secret, err := rp.DeriveSharedSecret(privKey, clientPub)
-	if err != nil {
-		return err
-	}
-	session, err := rp.SessionFromKey(secret)
+	session, err := rp.DeriveSession(privKey, clientPub)
 	if err != nil {
 		return err
 	}

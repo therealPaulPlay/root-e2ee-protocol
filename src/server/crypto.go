@@ -42,9 +42,19 @@ func GenerateKeypair() (*Keypair, error) {
 	}, nil
 }
 
-// DeriveSharedSecret performs P-256 ECDH between your private key and the other side's
+// DeriveSession performs P-256 ECDH between your private key and the other side's public key,
+// runs HKDF-SHA256 over the result, and returns an AES-GCM session bound to the derived key
+func DeriveSession(privateKey, publicKey []byte) (*Session, error) {
+	secret, err := deriveSharedSecret(privateKey, publicKey)
+	if err != nil {
+		return nil, err
+	}
+	return SessionFromKey(secret)
+}
+
+// deriveSharedSecret performs P-256 ECDH between your private key and the other side's
 // public key, then runs HKDF-SHA256 over the result to produce a 32-byte AES key
-func DeriveSharedSecret(privateKey, publicKey []byte) ([]byte, error) {
+func deriveSharedSecret(privateKey, publicKey []byte) ([]byte, error) {
 	curve := ecdh.P256()
 
 	priv, err := curve.NewPrivateKey(privateKey)

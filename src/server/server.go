@@ -163,7 +163,7 @@ func (s *Server) sessionFor(clientID, msgTypeForError, requestID string) (*Sessi
 	if err != nil {
 		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
 	}
-	secret, err := DeriveSharedSecret(priv, clientPub)
+	secret, err := deriveSharedSecret(priv, clientPub)
 	if err != nil {
 		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
 	}

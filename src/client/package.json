@@ -4,16 +4,23 @@
   "description": "End-to-end encrypted request/response protocol for ROOT.",
   "type": "module",
   "main": "./src/index.js",
+  "types": "./types/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./types/index.d.ts",
+      "default": "./src/index.js"
+    }
   },
   "files": [
-    "src"
+    "src",
+    "types"
   ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:types": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build:types"
   },
   "dependencies": {
     "cbor-x": "^1.5.9"

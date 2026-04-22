@@ -19,25 +19,10 @@ type KeyStore struct {
 // WriteFn is the host-owned wire
 type WriteFn func(clientID string, bytes []byte) error
 
-// IncomingMessage is the decoded, decrypted result handed to a request handler
-// Payload is still CBOR-encoded; the handler unmarshals it into its own types
-type IncomingMessage struct {
-	Type     string
-	ClientID string
-	Payload  []byte
-}
-
 // RequestHandler processes a client request and returns the reply payload
+// Payload decrypted, but still-CBOR-encoded; the handler unmarshals into its own types
 // Hosts encode app-level results as they see fit; the library does not inspect the shape
-type RequestHandler func(msg IncomingMessage) (replyPayload any)
-
-// ErrorHandler is called for protocol-level errors on inbound messages
-type ErrorHandler func(msg IncomingMessage, err error)
-
-type registeredErrorHandler struct {
-	id      uint64
-	handler ErrorHandler
-}
+type RequestHandler func(clientID string, payload []byte) (replyPayload any)
 
 type Server struct {
 	selfID   string
@@ -48,10 +33,8 @@ type Server struct {
 	sessionMu sync.Mutex
 	sessions  map[string]*Session
 
-	handlerMu        sync.RWMutex
-	requestHandlers  map[string]RequestHandler
-	errorHandlers    []registeredErrorHandler
-	nextErrHandlerID uint64
+	handlerMu       sync.RWMutex
+	requestHandlers map[string]RequestHandler
 }
 
 // NewServer constructs a server
@@ -88,30 +71,6 @@ func (s *Server) OffRequest(msgType string) {
 	delete(s.requestHandlers, msgType)
 }
 
-// OnError registers a handler for protocol-level errors on inbound messages
-// Returns an ID the host passes to OffError to unregister the handler
-// Multiple handlers are supported and fire in registration order
-func (s *Server) OnError(handler ErrorHandler) uint64 {
-	s.handlerMu.Lock()
-	defer s.handlerMu.Unlock()
-	s.nextErrHandlerID++
-	id := s.nextErrHandlerID
-	s.errorHandlers = append(s.errorHandlers, registeredErrorHandler{id, handler})
-	return id
-}
-
-// OffError unregisters a previously-added error handler by its ID
-func (s *Server) OffError(id uint64) {
-	s.handlerMu.Lock()
-	defer s.handlerMu.Unlock()
-	for i, h := range s.errorHandlers {
-		if h.id == id {
-			s.errorHandlers = append(s.errorHandlers[:i], s.errorHandlers[i+1:]...)
-			return
-		}
-	}
-}
-
 // Receive is the entry point for every inbound envelope from the transport layer
 // Reserved types are handled internally; app requests are dispatched to the handler
 // registered via OnRequest
@@ -136,26 +95,22 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
 	plaintext, err := session.Decrypt(env.Payload, aad)
 	if err != nil {
-		s.invokeError(IncomingMessage{Type: env.Type, ClientID: env.OriginID}, err)
-		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrDecryptionFailed))
+		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed))
 	}
 
 	// Reject replays: an authenticated ciphertext with a requestId we've already seen
 	if env.RequestID != "" && s.replay.check(env.RequestID) {
-		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrReplay))
+		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errReplay))
 	}
-
-	msg := IncomingMessage{Type: env.Type, ClientID: env.OriginID, Payload: plaintext}
 
 	s.handlerMu.RLock()
 	handler, ok := s.requestHandlers[env.Type]
 	s.handlerMu.RUnlock()
 	if !ok {
-		s.invokeError(msg, fmt.Errorf("no handler registered for type %s", env.Type))
-		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrUnknownType))
+		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errUnknownType))
 	}
 
-	replyPayload := handler(msg)
+	replyPayload := handler(env.OriginID, plaintext)
 	replyBytes, err := cbor.Marshal(replyPayload)
 	if err != nil {
 		return fmt.Errorf("marshal reply payload: %w", err)
@@ -202,19 +157,19 @@ func (s *Server) sessionFor(clientID, msgTypeForError, requestID string) (*Sessi
 
 	clientPub, ok := s.keyStore.GetClientPublicKey(clientID)
 	if !ok {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, ErrNoClientKey)
+		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errNoClientKey)
 	}
 	priv, err := s.keyStore.GetPrivateKey()
 	if err != nil {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, ErrInvalidKey)
+		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
 	}
 	secret, err := DeriveSharedSecret(priv, clientPub)
 	if err != nil {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, ErrInvalidKey)
+		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
 	}
 	session, err := SessionFromKey(secret)
 	if err != nil {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, ErrInternalError)
+		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInternalError)
 	}
 	s.sessions[clientID] = session
 	return session, nil
@@ -224,17 +179,6 @@ func (s *Server) invalidateSession(clientID string) {
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 	delete(s.sessions, clientID)
-}
-
-func (s *Server) invokeError(msg IncomingMessage, err error) {
-	s.handlerMu.RLock()
-	// Snapshot so we release the lock before calling user code
-	snapshot := make([]registeredErrorHandler, len(s.errorHandlers))
-	copy(snapshot, s.errorHandlers)
-	s.handlerMu.RUnlock()
-	for _, h := range snapshot {
-		h.handler(msg, err)
-	}
 }
 
 // buildEncryptedReply produces a reply envelope carrying encrypted payload bytes

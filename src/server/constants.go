@@ -12,13 +12,13 @@ var reservedTypes = []string{msgRenewKey, msgRenewKeyAck}
 // A request of type X gets a response of type X + resultSuffix
 const resultSuffix = "Result"
 
-// Canonical error codes emitted by the library
+// Protocol error codes emitted on the wire
 const (
-	ErrDecryptionFailed = "DECRYPTION_FAILED"
-	ErrNoClientKey      = "NO_CLIENT_KEY"
-	ErrInvalidKey       = "INVALID_KEY"
-	ErrInvalidPayload   = "INVALID_PAYLOAD"
-	ErrInternalError    = "INTERNAL_ERROR"
-	ErrUnknownType      = "UNKNOWN_TYPE"
-	ErrReplay           = "REPLAY"
+	errDecryptionFailed = "DECRYPTION_FAILED"
+	errNoClientKey      = "NO_CLIENT_KEY"
+	errInvalidKey       = "INVALID_KEY"
+	errInvalidPayload   = "INVALID_PAYLOAD"
+	errInternalError    = "INTERNAL_ERROR"
+	errUnknownType      = "UNKNOWN_TYPE"
+	errReplay           = "REPLAY"
 )

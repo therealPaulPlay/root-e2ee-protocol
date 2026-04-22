@@ -1,7 +1,6 @@
 package rootproto
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -29,36 +28,24 @@ func TestPushRejectsReservedTypes(t *testing.T) {
 	}
 }
 
-func TestErrorHandlersFireInRegistrationOrder(t *testing.T) {
+func TestOnRequestReplacesPriorHandler(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
 
 	var calls []string
-	server.OnError(func(IncomingMessage, error) { calls = append(calls, "a") })
-	server.OnError(func(IncomingMessage, error) { calls = append(calls, "b") })
-	server.OnError(func(IncomingMessage, error) { calls = append(calls, "c") })
+	server.OnRequest("ping", func(string, []byte) any { calls = append(calls, "first"); return nil })
+	server.OnRequest("ping", func(string, []byte) any { calls = append(calls, "second"); return nil })
 
-	server.invokeError(IncomingMessage{}, errors.New("boom"))
-
-	if strings.Join(calls, ",") != "a,b,c" {
-		t.Errorf("expected a,b,c got %v", calls)
+	handler, ok := server.requestHandlers["ping"]
+	if !ok {
+		t.Fatal("expected a handler registered for ping")
 	}
-}
-
-func TestOffErrorRemovesOnlyTargetedHandler(t *testing.T) {
-	server := newTestServer()
-	defer server.Close()
-
-	var calls []string
-	server.OnError(func(IncomingMessage, error) { calls = append(calls, "a") })
-	idB := server.OnError(func(IncomingMessage, error) { calls = append(calls, "b") })
-	server.OnError(func(IncomingMessage, error) { calls = append(calls, "c") })
-
-	server.OffError(idB)
-	server.invokeError(IncomingMessage{}, errors.New("boom"))
-
-	if strings.Join(calls, ",") != "a,c" {
-		t.Errorf("expected a,c got %v", calls)
+	handler("client", nil)
+	if strings.Join(calls, ",") != "second" {
+		t.Errorf("expected only the second handler to fire, got %v", calls)
+	}
+	if len(server.requestHandlers) != 1 {
+		t.Errorf("expected exactly one registered handler, got %d", len(server.requestHandlers))
 	}
 }
 

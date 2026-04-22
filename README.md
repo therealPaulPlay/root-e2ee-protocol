@@ -38,12 +38,10 @@ Methods:
 
 | Method | Parameters | Returns | Description |
 |---|---|---|---|
-| `request` | `serverId: string`, `type: string`, `payload: any`, `write: WriteFn` | `Promise<DecodedMessage>` | Encrypt and send a request, resolve when the server's reply arrives. |
-| `receive` | `bytes: Uint8Array` | `void` | Entry point for every inbound envelope. Host needs to call this for each message off the wire.|
-| `onPush` | `type: string`, `handler: PushHandler` | `void` | Register a push handler for a specific message type. Multiple handlers per type are supported and fire in registration order. |
-| `offPush` | `type: string`, `handler: PushHandler` | `void` | Remove a previously-registered push handler. |
-| `onError` | `handler: ErrorHandler` | `void` | Register an error handler. Multiple handlers are supported and fire in registration order. |
-| `offError` | `handler: ErrorHandler` | `void` | Remove a previously-registered error handler. |
+| `request` | `serverId: string`, `type: string`, `payload: any`, `write: WriteFn` | `Promise<any>` | Encrypt and send a request, resolve with the decoded reply payload. Rejects on protocol-level failures. |
+| `receive` | `bytes: Uint8Array` | `void` | Entry point for every inbound envelope. Host needs to call this for each message off the wire. |
+| `onPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Register a push handler scoped to `(serverId, type)`. Multiple handlers are supported and fire in registration order. |
+| `offPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Remove a previously-registered push handler. |
 
 
 Parameter function types:
@@ -51,8 +49,7 @@ Parameter function types:
 | Type | Signature | Description |
 |---|---|---|
 | `WriteFn` | `(bytes: Uint8Array) => void` | Host-provided function that writes envelope bytes onto the wire. Called by the library from inside `request`. |
-| `PushHandler` | `(msg: DecodedMessage) => void \| Promise<void>` | Registered via `onPush`, fires for server-initiated messages of a given type. |
-| `ErrorHandler` | `(msg: DecodedMessage) => void \| Promise<void>` | Registered via `onError`, fires for protocol-level errors on inbound messages. |
+| `PushHandler` | `(payload: any, error: RelayError \| null) => void \| Promise<void>` | Registered via `onPush`, fires for server-initiated messages of a given `(serverId, type)`. On protocol errors, `error` is set. |
 
 ### Type: `KeyStore`
 
@@ -64,17 +61,6 @@ The host implements this interface and passes an instance to the `Client` constr
 | `getPrevious` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array } \| null>` | Return the pair that was current immediately before the most recent renewal, or `null` if none is retained. The library falls back to this pair when decryption under the current pair fails. |
 | `commitNewKey` | `serverId: string`, `newPrivateKey: Uint8Array` | `Promise<void>` | Atomically move the current pair into previous and install `newPrivateKey` as the new current, with `createdAt` set to now. Called by the library at the end of a successful renewal. |
 | `revertToPrevious` | `serverId: string` | `Promise<void>` | Swap previous into current and clear previous. Called when the server reports `DECRYPTION_FAILED`, indicating the two sides fell out of sync during a prior renewal. |
-
-### Type: `DecodedMessage`
-
-Returned from `request` and passed to push and error handlers.
-
-| Field | Type | Description |
-|---|---|---|
-| `type` | `string` | Message type from the envelope. |
-| `originId` | `string` | Sender's ID. |
-| `payload` | `any \| null` | Decoded plaintext, or `null` when the envelope carried a protocol error. |
-| `error` | `string \| null` | Protocol error code (see "Constants" below), or `null` on success. |
 
 ### Class: `Session`
 
@@ -92,12 +78,6 @@ Returned by `deriveSession`. Provides AES-256-GCM encryption for use cases outsi
 | `generateKeypair` | — | `Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>` | Generate a fresh P-256 keypair. `publicKey` is raw uncompressed SEC1 (65 bytes). `privateKey` is PKCS8 DER. |
 | `deriveSession` | `privateKey: Uint8Array`, `publicKey: Uint8Array` | `Promise<Session>` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. `privateKey` is PKCS8 DER, `publicKey` is raw uncompressed SEC1. |
 
-### Constants
-
-| Name | Value | Description |
-|---|---|---|
-| `ERR_DECRYPTION_FAILED` | `"DECRYPTION_FAILED"` | Canonical code used when decryption fails. Compare `DecodedMessage.error` against this. |
-
 ## Go server
 
 Package: `github.com/therealPaulPlay/root-e2ee-protocol/src/server`, package name `rootproto`.
@@ -113,16 +93,13 @@ Constructor: `NewServer(selfID string, keyStore KeyStore) *Server`.
 | `Push` | `clientID, msgType string`, `payload any`, `write WriteFn` | `error` | Server-initiated push to a specific client. Payload is any CBOR-serializable value. |
 | `OnRequest` | `msgType string`, `handler RequestHandler` | — | Register the handler for a client-request type. Only one handler per type; calling this twice for the same type replaces the prior handler. |
 | `OffRequest` | `msgType string` | — | Unregister the handler for a type. |
-| `OnError` | `handler ErrorHandler` | `uint64` | Register an error handler. Returns an ID used to unregister. Multiple handlers are supported and fire in registration order. |
-| `OffError` | `id uint64` | — | Unregister a previously-added error handler by its ID. |
 
 Parameter function types:
 
 | Type | Signature | Description |
 |---|---|---|
 | `WriteFn` | `func(clientID string, bytes []byte) error` | Host-provided function that writes envelope bytes onto the connection associated with `clientID`. Called by the library from inside `Receive` and `Push`. |
-| `RequestHandler` | `func(msg IncomingMessage) (replyPayload any)` | The return value is CBOR-encoded and encrypted as the reply. Hosts encode app-level errors into `replyPayload` themselves; the library does not inspect the shape. |
-| `ErrorHandler` | `func(msg IncomingMessage, err error)` | Called for protocol-level failures on inbound messages (decryption failed, unknown type, etc). |
+| `RequestHandler` | `func(clientID string, payload []byte) (replyPayload any)` | `payload` is the decrypted, still-CBOR-encoded request body that the handler can marshal `cbor.Unmarshal(payload, &dst)` into its own typed struct. The return value is CBOR-encoded and encrypted as the reply. |
 
 ### Struct: `KeyStore`
 
@@ -133,16 +110,6 @@ Parameter function types:
 | `GetPrivateKey` | `func() ([]byte, error)` | Return the server's long-lived private key. One key is shared across all clients. |
 | `GetClientPublicKey` | `func(clientID string) ([]byte, bool)` | Return the current public key for the named client. Return `(nil, false)` if the client is unknown. |
 | `CommitClientPublicKey` | `func(clientID string, newPublicKey []byte) error` | Persist a client's new public key. Called by the library when a `renewKeyAck` validates successfully. |
-
-### Struct: `IncomingMessage`
-
-Passed to a `RequestHandler`.
-
-| Field | Type | Description |
-|---|---|---|
-| `Type` | `string` | Client's request type. |
-| `ClientID` | `string` | Originating client. |
-| `Payload` | `[]byte` | Decrypted plaintext, still CBOR-encoded. The handler calls `cbor.Unmarshal(msg.Payload, &dst)` into its own typed struct. The client side exposes payloads as already-decoded `any` because JS handles dynamic shapes natively; Go handlers benefit from unmarshalling into concrete types themselves. |
 
 ### Struct: `Keypair`
 
@@ -169,18 +136,6 @@ Returned by `SessionFromKey`. Provides AES-256-GCM encryption for use cases outs
 | `GenerateKeypair` | — | `(*Keypair, error)` | Generate a fresh P-256 keypair (raw bytes). |
 | `DeriveSharedSecret` | `privateKey, publicKey []byte` | `([]byte, error)` | ECDH followed by HKDF-SHA256. Returns a 32-byte AES key. |
 | `SessionFromKey` | `key []byte` | `(*Session, error)` | Construct an AES-GCM session from a 32-byte key. |
-
-### Constants
-
-| Name | Value | Description |
-|---|---|---|
-| `ErrDecryptionFailed` | `"DECRYPTION_FAILED"` | Set on an error envelope when the server cannot decrypt a received message. |
-| `ErrNoClientKey` | `"NO_CLIENT_KEY"` | Set when `GetClientPublicKey` returns `(nil, false)`. |
-| `ErrInvalidKey` | `"INVALID_KEY"` | Set when key parsing or ECDH derivation fails on the server side. |
-| `ErrInvalidPayload` | `"INVALID_PAYLOAD"` | Set when a reserved-type payload cannot be decoded. |
-| `ErrInternalError` | `"INTERNAL_ERROR"` | Catch-all for server-side failures that should not happen. |
-| `ErrUnknownType` | `"UNKNOWN_TYPE"` | Set when no handler is registered for the requested type. |
-| `ErrReplay` | `"REPLAY"` | Set when a request's `requestId` was already seen within the server's replay cache. |
 
 ## Tests
 

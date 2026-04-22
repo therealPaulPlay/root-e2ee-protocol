@@ -3,6 +3,7 @@ import { cbor } from "./envelope.js";
 import {
 	RESERVED_TYPES,
 	ERR_DECRYPTION_FAILED,
+	ERROR_MESSAGES,
 	DEFAULT_REQUEST_TIMEOUT_MS,
 	DEFAULT_KEY_MAX_AGE_MS
 } from "./constants.js";
@@ -31,24 +32,32 @@ import {
 /** @typedef {(bytes: Uint8Array) => void} WriteFn */
 
 /**
- * @typedef {Object} DecodedMessage
- * @property {string} type
- * @property {string} originId
- * @property {any} payload decoded plaintext, or null if the envelope carried a protocol error
- * @property {string | null} error protocol-level error code (e.g. UNKNOWN_TYPE), otherwise null
+ * Handler for server-initiated pushes
+ * On protocol error, payload is null and error is a RelayError
+ *
+ * @typedef {(payload: any, error: RelayError | null) => void | Promise<void>} PushHandler
  */
 
-/** @typedef {(msg: DecodedMessage) => void | Promise<void>} PushHandler */
-/** @typedef {(msg: DecodedMessage) => void | Promise<void>} ErrorHandler */
+/**
+ * Thrown when the server rejects a request at the protocol layer
+ * code holds the protocol error code; message holds a concise human-readable description
+ */
+export class RelayError extends Error {
+	/** @param {string} code */
+	constructor(code) {
+		super(ERROR_MESSAGES[code] ?? "No message provided");
+		this.name = "RelayError";
+		this.code = code;
+	}
+}
 
 export class Client {
 	#selfId;
 	#keyStore;
 	#sessions = new Map();
 	#pending = new Map(); // requestId -> { resolve, reject, timeout }
-	#pushHandlers = new Map(); // type -> PushHandler[]
-	/** @type {ErrorHandler[]} */
-	#errorHandlers = [];
+	/** @type {Map<string, Map<string, PushHandler[]>>} */
+	#pushHandlers = new Map(); // serverId -> type -> PushHandler[]
 	#renewalPromises = new Map(); // serverId -> Promise (coalesces concurrent renewals)
 	#requestTimeoutMs;
 	#keyMaxAgeMs;
@@ -68,56 +77,55 @@ export class Client {
 	}
 
 	/**
-	 * Register a handler for server-initiated message types
-	 * Multiple handlers per type fire in registration order
+	 * Register a handler for server-initiated pushes of the given type, scoped to one server
+	 * Multiple handlers per (serverId, type) fire in registration order
+	 * The handler receives (payload, error): on protocol errors, payload is null and error is a RelayError
 	 *
+	 * @param {string} serverId
 	 * @param {string} type
 	 * @param {PushHandler} handler
 	 */
-	onPush(type, handler) {
-		if (!this.#pushHandlers.has(type)) this.#pushHandlers.set(type, []);
-		this.#pushHandlers.get(type).push(handler);
+	onPush(serverId, type, handler) {
+		let byType = this.#pushHandlers.get(serverId);
+		if (!byType) {
+			byType = new Map();
+			this.#pushHandlers.set(serverId, byType);
+		}
+		let list = byType.get(type);
+		if (!list) {
+			list = [];
+			byType.set(type, list);
+		}
+		list.push(handler);
 	}
 
 	/**
+	 * @param {string} serverId
 	 * @param {string} type
 	 * @param {PushHandler} handler
 	 */
-	offPush(type, handler) {
-		const handlers = this.#pushHandlers.get(type);
-		if (!handlers) return;
-		const i = handlers.indexOf(handler);
-		if (i >= 0) handlers.splice(i, 1);
-		if (handlers.length === 0) this.#pushHandlers.delete(type);
+	offPush(serverId, type, handler) {
+		const byType = this.#pushHandlers.get(serverId);
+		if (!byType) return;
+		const list = byType.get(type);
+		if (!list) return;
+		const i = list.indexOf(handler);
+		if (i >= 0) list.splice(i, 1);
+		if (list.length === 0) byType.delete(type);
+		if (byType.size === 0) this.#pushHandlers.delete(serverId);
 	}
 
 	/**
-	 * Register a handler for protocol-level errors on inbound messages
-	 *
-	 * @param {ErrorHandler} handler
-	 */
-	onError(handler) {
-		this.#errorHandlers.push(handler);
-	}
-
-	/**
-	 * @param {ErrorHandler} handler
-	 */
-	offError(handler) {
-		const i = this.#errorHandlers.indexOf(handler);
-		if (i >= 0) this.#errorHandlers.splice(i, 1);
-	}
-
-	/**
-	 * Send an encrypted request and return the decrypted reply
+	 * Send an encrypted request and return the decrypted payload
 	 * Triggers a key renewal first if the current key is older than keyMaxAgeMs
 	 * On server-reported decryption failure, reverts to the previous key and retries once
+	 * Throws {@link RelayError} on protocol-level errors
 	 *
 	 * @param {string} serverId
 	 * @param {string} type
 	 * @param {unknown} payload CBOR-serializable
 	 * @param {WriteFn} write
-	 * @returns {Promise<DecodedMessage>}
+	 * @returns {Promise<any>} the decoded plaintext payload
 	 */
 	async request(serverId, type, payload, write) {
 		if (RESERVED_TYPES.includes(type)) throw new Error(`Reserved message type: ${type}`);
@@ -128,30 +136,30 @@ export class Client {
 	/**
 	 * Entry point for every inbound envelope from the transport layer
 	 * Replies to pending requests are resolved internally; everything else is dispatched
-	 * to registered handlers
+	 * to registered push handlers
 	 *
 	 * @param {Uint8Array} bytes
 	 */
 	async receive(bytes) {
 		const env = cbor.decode(bytes);
-		const decoded = await this.#decodeEnvelope(env, env.originId);
+		const result = await this.#decodeEnvelope(env, env.originId);
 
 		const pendingRequestId = env.requestId;
 		if (pendingRequestId && this.#pending.has(pendingRequestId)) {
 			const entry = this.#pending.get(pendingRequestId);
 			clearTimeout(entry.timeout);
 			this.#pending.delete(pendingRequestId);
-			entry.resolve(decoded);
+			if (result.error) entry.reject(new RelayError(result.error));
+			else entry.resolve(result.payload);
 			return;
 		}
 
-		if (decoded.error !== null) {
-			await this.#invoke(this.#errorHandlers, decoded);
-			return;
-		}
+		const byType = this.#pushHandlers.get(env.originId);
+		const handlers = byType?.get(env.type);
+		if (!handlers) return;
 
-		const handlers = this.#pushHandlers.get(decoded.type);
-		if (handlers) await this.#invoke(handlers, decoded);
+		const error = result.error ? new RelayError(result.error) : null;
+		await this.#invoke(handlers, result.payload, error);
 	}
 
 	/**
@@ -188,10 +196,9 @@ export class Client {
 
 		// Step 1: renewKey encrypted with OLD session. No retry fallback — a decryption error
 		// here would incorrectly rotate into the previous key
-		const renewReply = await this.#exchange(
+		await this.#exchange(
 			serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write, false
 		);
-		if (renewReply.error) throw new Error(`renewKey failed: ${renewReply.error}`);
 
 		// Step 2: current key becomes previous, new becomes current
 		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);
@@ -208,25 +215,30 @@ export class Client {
 	 * Encrypt, send, await the reply
 	 * If retryOnServerDecryptionFailure is true and the server reports DECRYPTION_FAILED,
 	 * reverts to the previous key and runs one additional exchange
+	 * Resolves with the decoded payload, rejects with {@link RelayError} on protocol errors
 	 *
 	 * @param {string} serverId
 	 * @param {string} type
 	 * @param {unknown} payload
 	 * @param {WriteFn} write
 	 * @param {boolean} retryOnServerDecryptionFailure
-	 * @returns {Promise<DecodedMessage>}
+	 * @returns {Promise<any>}
 	 */
 	async #exchange(serverId, type, payload, write, retryOnServerDecryptionFailure) {
-		const reply = await this.#roundtrip(serverId, type, payload, write);
-		if (!retryOnServerDecryptionFailure || reply.error !== ERR_DECRYPTION_FAILED) return reply;
+		try {
+			return await this.#roundtrip(serverId, type, payload, write);
+		} catch (error) {
+			if (!retryOnServerDecryptionFailure) throw error;
+			if (!(error instanceof RelayError) || error.code !== ERR_DECRYPTION_FAILED) throw error;
 
-		// Retry with previous encryption if available
-		const prev = await this.#keyStore.getPrevious(serverId);
-		if (!prev) return reply;
+			// Retry with previous encryption if available
+			const prev = await this.#keyStore.getPrevious(serverId);
+			if (!prev) throw error;
 
-		await this.#keyStore.revertToPrevious(serverId);
-		this.#sessions.delete(serverId);
-		return this.#roundtrip(serverId, type, payload, write);
+			await this.#keyStore.revertToPrevious(serverId);
+			this.#sessions.delete(serverId);
+			return this.#roundtrip(serverId, type, payload, write);
+		}
 	}
 
 	/**
@@ -237,7 +249,7 @@ export class Client {
 	 * @param {string} type
 	 * @param {unknown} payload
 	 * @param {WriteFn} write
-	 * @returns {Promise<DecodedMessage>}
+	 * @returns {Promise<any>}
 	 */
 	async #roundtrip(serverId, type, payload, write) {
 		const requestId = crypto.randomUUID();
@@ -268,13 +280,13 @@ export class Client {
 	 *
 	 * @param {{type: string, originId: string, targetId: string, requestId: string, payload: Uint8Array, error?: string}} env
 	 * @param {string} serverId
-	 * @returns {Promise<DecodedMessage>}
+	 * @returns {Promise<{ payload: any, error: string | null }>}
 	 */
 	async #decodeEnvelope(env, serverId) {
 		const { type, originId, payload, error } = env;
 
 		// Incoming envelope includes protocol-level (unencrypted) error, surface it
-		if (error) return { type, originId, payload: null, error };
+		if (error) return { payload: null, error };
 
 		const aad = await computeAAD(type, originId, env.targetId);
 
@@ -283,7 +295,6 @@ export class Client {
 			try {
 				const plaintext = await session.decrypt(payload, aad);
 				return {
-					type, originId,
 					payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
 					error: null
 				};
@@ -296,26 +307,26 @@ export class Client {
 				const prevSession = await deriveSession(prev.privateKey, prev.serverPublicKey);
 				const plaintext = await prevSession.decrypt(payload, aad);
 				return {
-					type, originId,
 					payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
 					error: null
 				};
 			} catch { }
 		}
 
-		return { type, originId, payload: null, error: ERR_DECRYPTION_FAILED };
+		return { payload: null, error: ERR_DECRYPTION_FAILED };
 	}
 
 	/**
-	 * Invoke every handler in the list for a message, swallowing errors individually
+	 * Invoke every handler in the list, swallowing errors individually
 	 *
-	 * @param {Array<(msg: DecodedMessage) => void | Promise<void>>} handlers
-	 * @param {DecodedMessage} msg
+	 * @param {PushHandler[]} handlers
+	 * @param {any} payload
+	 * @param {RelayError | null} error
 	 */
-	async #invoke(handlers, msg) {
+	async #invoke(handlers, payload, error) {
 		for (const handler of handlers) {
-			try { await handler(msg); }
-			catch (error) { console.error("handler error:", error); }
+			try { await handler(payload, error); }
+			catch (handlerError) { console.error("Handler error:", handlerError); }
 		}
 	}
 

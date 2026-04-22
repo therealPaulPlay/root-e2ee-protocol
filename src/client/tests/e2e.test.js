@@ -172,31 +172,28 @@ describe("e2e cross-language", () => {
 	test("roundtrips an echo request", async () => {
 		h = await spawnHarness();
 		const reply = await h.client.request("server-1", "echo", { hello: "world" }, h.write);
-		expect(reply.error).toBeNull();
-		expect(reply.payload).toEqual({ hello: "world" });
+		expect(reply).toEqual({ hello: "world" });
 	});
 
 	test("roundtrips an add request with structured CBOR", async () => {
 		h = await spawnHarness();
 		const reply = await h.client.request("server-1", "add", { a: 3, b: 4 }, h.write);
-		expect(reply.error).toBeNull();
-		expect(reply.payload).toEqual({ sum: 7 });
+		expect(reply).toEqual({ sum: 7 });
 	});
 
-	test("returns UNKNOWN_TYPE for unregistered request types", async () => {
+	test("throws RelayError(UNKNOWN_TYPE) for unregistered request types", async () => {
 		h = await spawnHarness();
-		const reply = await h.client.request("server-1", "non-existant", {}, h.write);
-		expect(reply.error).toBe("UNKNOWN_TYPE");
-		expect(reply.payload).toBeNull();
+		await expect(h.client.request("server-1", "non-existant", {}, h.write))
+			.rejects.toMatchObject({ name: "RelayError", code: "UNKNOWN_TYPE" });
 	});
 
 	test("delivers a server push via onPush", async () => {
 		h = await spawnHarness();
 		/** @type {any[]} */
 		const pushes = [];
-		h.client.onPush("tick", (msg) => { pushes.push(msg.payload); });
+		h.client.onPush("server-1", "tick", (payload) => { pushes.push(payload); });
 		const reply = await h.client.request("server-1", "trigger-push", {}, h.write);
-		expect(reply.payload).toEqual({ ok: true });
+		expect(reply).toEqual({ ok: true });
 		expect(pushes).toEqual([{ n: 42 }]);
 	});
 
@@ -206,16 +203,16 @@ describe("e2e cross-language", () => {
 		const originalPriv = h.keyState.current.privateKey;
 
 		const r1 = await h.client.request("server-1", "echo", { n: 1 }, h.write);
-		expect(r1.payload).toEqual({ n: 1 });
+		expect(r1).toEqual({ n: 1 });
 		expect(h.keyState.current.privateKey).not.toEqual(originalPriv);
 		const afterFirst = h.keyState.current.privateKey;
 
 		const r2 = await h.client.request("server-1", "echo", { n: 2 }, h.write);
-		expect(r2.payload).toEqual({ n: 2 });
+		expect(r2).toEqual({ n: 2 });
 		expect(h.keyState.current.privateKey).not.toEqual(afterFirst);
 
 		const r3 = await h.client.request("server-1", "echo", { n: 3 }, h.write);
-		expect(r3.payload).toEqual({ n: 3 });
+		expect(r3).toEqual({ n: 3 });
 	});
 
 	test("recovers from a lost renewKeyAck by reverting to the previous key", async () => {
@@ -227,8 +224,7 @@ describe("e2e cross-language", () => {
 		// pov the key was never committed -> next real request encrypts with the new key ->
 		// server can't decrypt -> returns DECRYPTION_FAILED -> client reverts to previous and retries
 		const reply = await h.client.request("server-1", "echo", { hi: true }, h.write);
-		expect(reply.error).toBeNull();
-		expect(reply.payload).toEqual({ hi: true });
+		expect(reply).toEqual({ hi: true });
 		expect(h.keyState.current.privateKey).toEqual(originalPriv);
 		expect(h.keyState.previous).toBeNull();
 	});
@@ -240,8 +236,8 @@ describe("e2e cross-language", () => {
 		/** @type {((v: any) => void)|null} */
 		let resolveStale = null;
 		const staleReceived = new Promise((r) => { resolveStale = r; });
-		h.client.onPush("stale-tick", (msg) => {
-			pushes.push(msg.payload);
+		h.client.onPush("server-1", "stale-tick", (payload) => {
+			pushes.push(payload);
 			if (resolveStale) resolveStale(null);
 			return undefined;
 		});
@@ -256,8 +252,7 @@ describe("e2e cross-language", () => {
 
 		// Subsequent traffic must continue using the new session (not get stuck on the previous one)
 		const followUp = await h.client.request("server-1", "echo", { after: true }, h.write);
-		expect(followUp.error).toBeNull();
-		expect(followUp.payload).toEqual({ after: true });
+		expect(followUp).toEqual({ after: true });
 	});
 
 	test("rejects requests with reserved message types", async () => {
@@ -266,7 +261,7 @@ describe("e2e cross-language", () => {
 		await expect(h.client.request("server-1", "renewKeyAck", {}, h.write)).rejects.toThrow(/Reserved/);
 	});
 
-	test("rejects replayed request envelopes with REPLAY", async () => {
+	test("surfaces a replayed request envelope as a REPLAY error on a matching push handler", async () => {
 		const harness = await spawnHarness();
 		h = harness;
 
@@ -278,13 +273,16 @@ describe("e2e cross-language", () => {
 		};
 
 		const first = await harness.client.request("server-1", "echo", { once: true }, capturingWrite);
-		expect(first.error).toBeNull();
+		expect(first).toEqual({ once: true });
 
-		// Replayed envelope routes to onError because its requestId no longer matches a pending request
+		// Replayed envelope's requestId no longer matches a pending request, so it routes
+		// to push handlers; the server-emitted REPLAY arrives as an error on the "echoResult" type
 		/** @type {(error: string) => void} */
 		let resolveError = () => { };
 		const errorReceived = new Promise((/** @type {(value: string) => void} */ resolve) => { resolveError = resolve; });
-		harness.client.onError((msg) => { if (msg.error) resolveError(msg.error); });
+		harness.client.onPush("server-1", "echoResult", (_payload, error) => {
+			if (error) resolveError(error.code);
+		});
 
 		if (!captured) throw new Error("write was not captured");
 		harness.write(captured);

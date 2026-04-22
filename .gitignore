@@ -17,3 +17,6 @@ vendor/
 
 # TypeScript (JSDoc-only typecheck)
 tsconfig.tsbuildinfo
+
+# Generated declaration files
+src/client/types/

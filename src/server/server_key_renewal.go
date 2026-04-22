@@ -8,49 +8,49 @@ import "github.com/fxamacker/cbor/v2"
 func (s *Server) handleRenewKey(env envelope) []byte {
 	clientPub, ok := s.keyStore.GetClientPublicKey(env.OriginID)
 	if !ok {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrNoClientKey)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errNoClientKey)
 	}
 	priv, err := s.keyStore.GetPrivateKey()
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInvalidKey)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}
 
 	oldSecret, err := DeriveSharedSecret(priv, clientPub)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInvalidKey)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}
 	oldSession, err := SessionFromKey(oldSecret)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
 	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
 	plaintext, err := oldSession.Decrypt(env.Payload, aad)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrDecryptionFailed)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed)
 	}
 
 	var req struct {
 		NewPublicKey []byte `cbor:"newPublicKey"`
 	}
 	if err := cbor.Unmarshal(plaintext, &req); err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInvalidPayload)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidPayload)
 	}
 
 	newSecret, err := DeriveSharedSecret(priv, req.NewPublicKey)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInvalidKey)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}
 	newSession, err := SessionFromKey(newSecret)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
 	s.keys.bufferPending(env.OriginID, req.NewPublicKey, newSession)
 
 	out, err := s.buildEncryptedReply(env.OriginID, env.Type+resultSuffix, nil, env.RequestID, oldSession)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 	return out
 }
@@ -61,31 +61,31 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 func (s *Server) handleRenewKeyAck(env envelope) []byte {
 	pending, ok := s.keys.takePending(env.OriginID)
 	if !ok {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
 	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
 	plaintext, err := pending.session.Decrypt(env.Payload, aad)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrDecryptionFailed)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed)
 	}
 
 	var req struct {
 		Ack bool `cbor:"ack"`
 	}
 	if err := cbor.Unmarshal(plaintext, &req); err != nil || !req.Ack {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInvalidPayload)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidPayload)
 	}
 
 	if err := s.keyStore.CommitClientPublicKey(env.OriginID, pending.clientPublicKey); err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
 	s.invalidateSession(env.OriginID)
 
 	out, err := s.buildEncryptedReply(env.OriginID, env.Type+resultSuffix, nil, env.RequestID, pending.session)
 	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, ErrInternalError)
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 	return out
 }

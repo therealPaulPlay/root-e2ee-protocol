@@ -103,7 +103,7 @@ Parameter function types:
 
 ### Struct: `KeyStore`
 
-**The host populates this struct of function fields** and passes it to `NewServer`. The library calls these functions to read and persist key material. All private keys are raw 32-byte scalars; all public keys are raw uncompressed SEC1 (65 bytes).
+The host populates this struct of function fields and passes it to `NewServer`. The library calls these functions to read and persist key material. All private keys are raw 32-byte scalars; all public keys are raw uncompressed SEC1 (65 bytes).
 
 | Field | Signature | Expected behavior |
 |---|---|---|

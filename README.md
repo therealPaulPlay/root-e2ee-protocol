@@ -16,7 +16,7 @@ go get github.com/therealPaulPlay/root-e2ee-protocol/src/server
 
 - Key ownership: The server has one long-lived private key shared across all clients. Each client has one private key per server it talks to.
 - Key renewal: Only the client initiates renewal. The server is reactive.
-- Reply expectations: Clients always get a reply to a request, while servers can push messages without expecting anything back.
+- Response expectations: Clients always get a response to a request, while servers can push messages without expecting anything back.
 - Ordering: Requests do not guarantee arrival order. If you fire multiple requests without awaiting, they run in parallel and resolve as their replies arrive (and not in the order you sent them). Use `await` before the next request if you need them handled in sequence. Push handlers fire whenever a push arrives and may interleave with requests. Do not assume a push has been handled just because a later request has resolved.
 
 ## JS client

@@ -115,7 +115,7 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	if err != nil {
 		return fmt.Errorf("marshal reply payload: %w", err)
 	}
-	reply, err := s.buildEncryptedReply(env.OriginID, env.Type+resultSuffix, replyBytes, env.RequestID, session)
+	reply, err := s.buildEncryptedReply(env.OriginID, env.Type, replyBytes, env.RequestID, session)
 	if err != nil {
 		return err
 	}
@@ -201,7 +201,7 @@ func (s *Server) buildEncryptedReply(clientID, msgType string, payload []byte, r
 // buildProtocolError produces a plaintext envelope carrying a library-owned error code
 func (s *Server) buildProtocolError(clientID, requestID, requestType, code string) []byte {
 	out, _ := marshalEnvelope(envelope{
-		Type:      requestType + resultSuffix,
+		Type:      requestType,
 		OriginID:  s.selfID,
 		TargetID:  clientID,
 		RequestID: requestID,

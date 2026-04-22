@@ -276,11 +276,11 @@ describe("e2e cross-language", () => {
 		expect(first).toEqual({ once: true });
 
 		// Replayed envelope's requestId no longer matches a pending request, so it routes
-		// to push handlers; the server-emitted REPLAY arrives as an error on the "echoResult" type
+		// to push handlers; the server-emitted REPLAY arrives as an error on the "echo" type
 		/** @type {(error: string) => void} */
 		let resolveError = () => { };
 		const errorReceived = new Promise((/** @type {(value: string) => void} */ resolve) => { resolveError = resolve; });
-		harness.client.onPush("server-1", "echoResult", (_payload, error) => {
+		harness.client.onPush("server-1", "echo", (_payload, error) => {
 			if (error) resolveError(error.code);
 		});
 

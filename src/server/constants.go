@@ -9,9 +9,6 @@ const (
 // Types the kernel handles internally, hosts must not send these via Push
 var reservedTypes = []string{msgRenewKey, msgRenewKeyAck}
 
-// A request of type X gets a response of type X + resultSuffix
-const resultSuffix = "Result"
-
 // Protocol error codes emitted on the wire
 const (
 	errDecryptionFailed = "DECRYPTION_FAILED"

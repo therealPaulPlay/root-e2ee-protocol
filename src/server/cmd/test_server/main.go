@@ -116,7 +116,7 @@ func main() {
 	}
 	defer conn.Close()
 
-	writeFn := func(toClientID string, bytes []byte) error {
+	writeFn := func(bytes []byte) error {
 		return writeFrame(conn, bytes)
 	}
 

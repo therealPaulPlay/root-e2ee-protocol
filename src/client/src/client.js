@@ -1,5 +1,5 @@
+import { Encoder } from "cbor-x";
 import { deriveSession, computeAAD, generateKeypair } from "./crypto.js";
-import { cbor } from "./envelope.js";
 import {
 	RESERVED_TYPES,
 	ERR_DECRYPTION_FAILED,
@@ -7,6 +7,12 @@ import {
 	DEFAULT_REQUEST_TIMEOUT_MS,
 	DEFAULT_KEY_MAX_AGE_MS
 } from "./constants.js";
+
+// int64AsNumber avoids BigInt values that break Date() and other JS APIs
+// Cast: the option exists at runtime but is missing from cbor-x's type definitions
+/** @type {import("cbor-x").Options & { int64AsNumber?: boolean }} */
+const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: true };
+const cbor = new Encoder(cborOptions);
 
 /**
  * @typedef {Object} CurrentKeyCombination

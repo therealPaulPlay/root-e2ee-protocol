@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateKeypair, deriveSession, Session } from "../src/crypto.js";
+import { generateKeypair, deriveSession } from "../src/crypto.js";
 
 describe("generateKeypair", () => {
 	it("produces a raw uncompressed SEC1 public key (65 bytes, leading 0x04) and a PKCS8 private key", async () => {

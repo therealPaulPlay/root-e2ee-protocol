@@ -18,7 +18,7 @@ func TestPushRejectsReservedTypes(t *testing.T) {
 	server := newTestServer()
 	defer server.Close()
 
-	noopWrite := func(string, []byte) error { return nil }
+	noopWrite := func([]byte) error { return nil }
 
 	for _, reserved := range []string{"renewKey", "renewKeyAck"} {
 		err := server.Push("client", reserved, nil, noopWrite)

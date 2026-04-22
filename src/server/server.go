@@ -17,7 +17,7 @@ type KeyStore struct {
 }
 
 // WriteFn is the host-owned wire
-type WriteFn func(clientID string, bytes []byte) error
+type WriteFn func(bytes []byte) error
 
 // RequestHandler processes a client request and returns the reply payload
 // Payload decrypted, but still-CBOR-encoded; the handler unmarshals into its own types
@@ -82,32 +82,32 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 
 	switch env.Type {
 	case msgRenewKey:
-		return write(env.OriginID, s.handleRenewKey(env))
+		return write(s.handleRenewKey(env))
 	case msgRenewKeyAck:
-		return write(env.OriginID, s.handleRenewKeyAck(env))
+		return write(s.handleRenewKeyAck(env))
 	}
 
 	session, errReply := s.sessionFor(env.OriginID, env.Type, env.RequestID)
 	if errReply != nil {
-		return write(env.OriginID, errReply)
+		return write(errReply)
 	}
 
 	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
 	plaintext, err := session.Decrypt(env.Payload, aad)
 	if err != nil {
-		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed))
+		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed))
 	}
 
 	// Reject replays: an authenticated ciphertext with a requestId we've already seen
 	if env.RequestID != "" && s.replay.check(env.RequestID) {
-		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errReplay))
+		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errReplay))
 	}
 
 	s.handlerMu.RLock()
 	handler, ok := s.requestHandlers[env.Type]
 	s.handlerMu.RUnlock()
 	if !ok {
-		return write(env.OriginID, s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errUnknownType))
+		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errUnknownType))
 	}
 
 	replyPayload := handler(env.OriginID, plaintext)
@@ -119,7 +119,7 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	if err != nil {
 		return err
 	}
-	return write(env.OriginID, reply)
+	return write(reply)
 }
 
 // Push encrypts and sends a message not triggered by an incoming request
@@ -142,7 +142,7 @@ func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) erro
 	if err != nil {
 		return err
 	}
-	return write(clientID, bytes)
+	return write(bytes)
 }
 
 // sessionFor returns the cached session for a client, deriving one on cache miss

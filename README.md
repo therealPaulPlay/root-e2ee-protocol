@@ -98,7 +98,7 @@ Parameter function types:
 
 | Type | Signature | Description |
 |---|---|---|
-| `WriteFn` | `func(clientID string, bytes []byte) error` | Host-provided function that writes envelope bytes onto the connection associated with `clientID`. Called by the library from inside `Receive` and `Push`. |
+| `WriteFn` | `func(bytes []byte) error` | Host-provided function that writes envelope bytes onto the connection. Called by the library from inside `Receive` and `Push`. |
 | `RequestHandler` | `func(clientID string, payload []byte) (replyPayload any)` | `payload` is the decrypted, still-CBOR-encoded request body that the handler can marshal `cbor.Unmarshal(payload, &dst)` into its own typed struct. The return value is CBOR-encoded and encrypted as the reply. |
 
 ### Struct: `KeyStore`

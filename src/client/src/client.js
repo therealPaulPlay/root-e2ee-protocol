@@ -24,7 +24,7 @@ import {
  * @typedef {Object} KeyStore
  * @property {(serverId: string) => Promise<CurrentKeyCombination | null>} getCurrent
  * @property {(serverId: string) => Promise<PreviousKeyCombination | null>} getPrevious
- * @property {(serverId: string, newPrivateKey: Uint8Array, serverPublicKey: Uint8Array) => Promise<void>} commitNewKey
+ * @property {(serverId: string, newPrivateKey: Uint8Array) => Promise<void>} commitNewKey
  * @property {(serverId: string) => Promise<void>} revertToPrevious
  */
 
@@ -194,7 +194,7 @@ export class Client {
 		if (renewReply.error) throw new Error(`renewKey failed: ${renewReply.error}`);
 
 		// Step 2: current key becomes previous, new becomes current
-		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey, current.serverPublicKey);
+		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);
 		this.#sessions.delete(serverId);
 
 		// Step 3: ACK encrypted with NEW session. Non-fatal if the reply is lost;

@@ -58,11 +58,10 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs } =
 		/**
 		 * @param {string} _id
 		 * @param {Uint8Array} newPriv
-		 * @param {Uint8Array} srvPub
 		 */
-		async commitNewKey(_id, newPriv, srvPub) {
+		async commitNewKey(_id, newPriv) {
 			keyState.previous = { privateKey: keyState.current.privateKey, serverPublicKey: keyState.current.serverPublicKey };
-			keyState.current = { privateKey: newPriv, serverPublicKey: srvPub, createdAt: Date.now() };
+			keyState.current = { privateKey: newPriv, serverPublicKey: keyState.current.serverPublicKey, createdAt: Date.now() };
 		},
 		async revertToPrevious() {
 			if (!keyState.previous) return;

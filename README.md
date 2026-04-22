@@ -62,7 +62,7 @@ The host implements this interface and passes an instance to the `Client` constr
 |---|---|---|---|
 | `getCurrent` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array, createdAt: number } \| null>` | Return the client's current private key for this server, the server's current public key, and the epoch ms the pair was installed. Return `null` if no key is stored. |
 | `getPrevious` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array } \| null>` | Return the pair that was current immediately before the most recent renewal, or `null` if none is retained. The library falls back to this pair when decryption under the current pair fails. |
-| `commitNewKey` | `serverId: string`, `newPrivateKey: Uint8Array`, `serverPublicKey: Uint8Array` | `Promise<void>` | Atomically move the current pair into previous and install `(newPrivateKey, serverPublicKey)` as the new current, with `createdAt` set to now. Called by the library at the end of a successful renewal. |
+| `commitNewKey` | `serverId: string`, `newPrivateKey: Uint8Array` | `Promise<void>` | Atomically move the current pair into previous and install `newPrivateKey` as the new current, with `createdAt` set to now. Called by the library at the end of a successful renewal. |
 | `revertToPrevious` | `serverId: string` | `Promise<void>` | Swap previous into current and clear previous. Called when the server reports `DECRYPTION_FAILED`, indicating the two sides fell out of sync during a prior renewal. |
 
 ### Type: `DecodedMessage`

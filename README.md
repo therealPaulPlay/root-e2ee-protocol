@@ -58,8 +58,8 @@ The host implements this interface and passes an instance to the `Client` constr
 | Method | Parameters | Returns | Expected behavior |
 |---|---|---|---|
 | `getCurrent` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array, createdAt: number } \| null>` | Return the client's current private key for this server, the server's current public key, and the epoch ms the pair was installed. Return `null` if no key is stored. |
-| `getPrevious` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array } \| null>` | Return the pair that was current immediately before the most recent renewal, or `null` if none is retained. The library falls back to this pair when decryption under the current pair fails. |
-| `commitNewKey` | `serverId: string`, `newPrivateKey: Uint8Array` | `Promise<void>` | Atomically move the current pair into previous and install `newPrivateKey` as the new current, with `createdAt` set to now. Called by the library at the end of a successful renewal. |
+| `getPrevious` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array } \| null>` | Return the pair that was current immediately before the most recent renewal, or `null` if none is retained. |
+| `commitNewKey` | `serverId: string`, `newPrivateKey: Uint8Array` | `Promise<void>` | Atomically move the current pair into previous and install `newPrivateKey` as the new current, with `createdAt` set to now. |
 | `revertToPrevious` | `serverId: string` | `Promise<void>` | Swap previous into current and clear previous. Called when the server reports `DECRYPTION_FAILED`, indicating the two sides fell out of sync during a prior renewal. |
 
 ### Class: `Session`
@@ -109,7 +109,7 @@ The host populates this struct of function fields and passes it to `NewServer`. 
 |---|---|---|
 | `GetPrivateKey` | `func() ([]byte, error)` | Return the server's long-lived private key. One key is shared across all clients. |
 | `GetClientPublicKey` | `func(clientID string) ([]byte, bool)` | Return the current public key for the named client. Return `(nil, false)` if the client is unknown. |
-| `CommitClientPublicKey` | `func(clientID string, newPublicKey []byte) error` | Persist a client's new public key. Called by the library when a `renewKeyAck` validates successfully. |
+| `CommitClientPublicKey` | `func(clientID string, newPublicKey []byte) error` | Persist a client's new public key. |
 
 ### Struct: `Keypair`
 

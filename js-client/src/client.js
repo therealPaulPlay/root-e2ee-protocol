@@ -67,6 +67,7 @@ export class Client {
 	#renewalPromises = new Map(); // serverId -> Promise (coalesces concurrent renewals)
 	#requestTimeoutMs;
 	#keyMaxAgeMs;
+	#closed = false;
 
 	/**
 	 * @param {Object} opts
@@ -92,6 +93,7 @@ export class Client {
 	 * @param {PushHandler} handler
 	 */
 	onPush(serverId, type, handler) {
+		if (this.#closed) throw new Error("Client closed");
 		let byType = this.#pushHandlers.get(serverId);
 		if (!byType) {
 			byType = new Map();
@@ -134,6 +136,7 @@ export class Client {
 	 * @returns {Promise<any>} the decoded plaintext payload
 	 */
 	async request(serverId, type, payload, write) {
+		if (this.#closed) throw new Error("Client closed");
 		if (RESERVED_TYPES.includes(type)) throw new Error(`Reserved message type: ${type}`);
 		await this.#ensureKeyFresh(serverId, write);
 		return this.#exchange(serverId, type, payload, write, true);
@@ -147,6 +150,7 @@ export class Client {
 	 * @param {Uint8Array} bytes
 	 */
 	async receive(bytes) {
+		if (this.#closed) throw new Error("Client closed");
 		const env = cbor.decode(bytes);
 		const result = await this.#decodeEnvelope(env, env.originId);
 
@@ -348,5 +352,22 @@ export class Client {
 		const session = await deriveSession(current.privateKey, current.serverPublicKey);
 		this.#sessions.set(serverId, session);
 		return session;
+	}
+
+	/**
+	 * Release all client state: reject pending requests, clear push handlers,
+	 * and drop cached sessions
+	 */
+	close() {
+		if (this.#closed) return;
+		this.#closed = true;
+		for (const entry of this.#pending.values()) {
+			clearTimeout(entry.timeout);
+			entry.reject(new Error("Client closed"));
+		}
+		this.#pending.clear();
+		this.#pushHandlers.clear();
+		this.#sessions.clear();
+		this.#renewalPromises.clear();
 	}
 }

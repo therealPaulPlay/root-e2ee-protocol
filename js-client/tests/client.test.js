@@ -86,4 +86,31 @@ describe("Client push handlers", () => {
 		await client.receive(errorEnvelope());
 		expect(calls).toEqual(["matched"]);
 	});
+
+	test("close drops registered handlers", async () => {
+		const client = makeClient();
+		/** @type {string[]} */
+		const calls = [];
+		client.onPush("s", "tick", () => { calls.push("fired"); });
+
+		client.close();
+
+		await expect(client.receive(errorEnvelope())).rejects.toThrow(/Client closed/);
+		expect(calls).toEqual([]);
+	});
+
+	test("request, receive, and onPush throw after close", async () => {
+		const client = makeClient();
+		client.close();
+
+		await expect(client.request("s", "t", {}, () => { })).rejects.toThrow(/Client closed/);
+		await expect(client.receive(errorEnvelope())).rejects.toThrow(/Client closed/);
+		expect(() => client.onPush("s", "tick", () => { })).toThrow(/Client closed/);
+	});
+
+	test("close is idempotent", () => {
+		const client = makeClient();
+		client.close();
+		client.close(); // should not throw
+	});
 });

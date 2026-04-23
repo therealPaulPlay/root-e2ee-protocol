@@ -42,6 +42,7 @@ Methods:
 | `receive` | `bytes: Uint8Array` | `void` | Entry point for every inbound envelope. Host needs to call this for each message off the wire. |
 | `onPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Register a push handler scoped to `(serverId, type)`. Multiple handlers are supported and fire in registration order. |
 | `offPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Remove a previously-registered push handler. |
+| `close` | — | `void` | Call when the client is no longer needed so pending requests reject immediately instead of waiting for their timeout. The instance must not be reused afterwards. |
 
 
 Parameter function types:

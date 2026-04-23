@@ -30,6 +30,28 @@ func newTestServer(t *testing.T) *Server {
 	return server
 }
 
+// Close is idempotent and guards post-close public calls
+func TestCloseIsIdempotentAndGuardsFurtherUse(t *testing.T) {
+	server := newTestServer(t)
+
+	server.Close()
+	server.Close() // should not panic
+
+	noopWrite := func([]byte) error { return nil }
+	if err := server.Push("client", "whatever", nil, noopWrite); err == nil {
+		t.Error("Push after Close should return an error")
+	}
+	if err := server.Receive([]byte{0x00}, noopWrite); err == nil {
+		t.Error("Receive after Close should return an error")
+	}
+	if err := server.OnRequest("ping", func(string, []byte, RespondFn) any { return nil }); err == nil {
+		t.Error("OnRequest after Close should return an error")
+	}
+	if err := server.OffRequest("ping"); err == nil {
+		t.Error("OffRequest after Close should return an error")
+	}
+}
+
 func TestPushRejectsReservedTypes(t *testing.T) {
 	server := newTestServer(t)
 	defer server.Close()
@@ -93,17 +115,17 @@ func TestSessionFromKeyChangesWhenStoredKeyChanges(t *testing.T) {
 	}
 	defer server.Close()
 
-	firstSession, errReply := server.sessionFor("client-a", "test", "req-1")
-	if errReply != nil {
-		t.Fatalf("first sessionFor returned error envelope")
+	firstSession, errorCode := server.sessionFor("client-a")
+	if errorCode != "" {
+		t.Fatalf("first sessionFor failed: %s", errorCode)
 	}
 
 	// Re-pair: swap the client's public key out-from-under the server
 	currentClientPub = secondClient.PublicKey
 
-	secondSession, errReply := server.sessionFor("client-a", "test", "req-2")
-	if errReply != nil {
-		t.Fatalf("second sessionFor returned error envelope")
+	secondSession, errorCode := server.sessionFor("client-a")
+	if errorCode != "" {
+		t.Fatalf("second sessionFor failed: %s", errorCode)
 	}
 	if firstSession == secondSession {
 		t.Error("sessionFor should have re-derived after the stored client key changed")

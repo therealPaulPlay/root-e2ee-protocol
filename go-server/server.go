@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"sync/atomic"
 
 	"github.com/fxamacker/cbor/v2"
 )
@@ -38,6 +39,9 @@ type Server struct {
 
 	handlerMu       sync.RWMutex
 	requestHandlers map[string]RequestHandler
+
+	closeOnce sync.Once
+	closed    atomic.Bool
 }
 
 // cachedSession pairs a derived session with the key material that produced it
@@ -67,17 +71,25 @@ func NewServer(selfID string, keyStore KeyStore, replayStore ReplayStore) (*Serv
 
 // OnRequest registers the handler for a client-request type
 // Only one handler per type; calling OnRequest twice for the same type replaces the prior handler
-func (s *Server) OnRequest(msgType string, handler RequestHandler) {
+func (s *Server) OnRequest(msgType string, handler RequestHandler) error {
+	if s.closed.Load() {
+		return fmt.Errorf("server closed")
+	}
 	s.handlerMu.Lock()
 	defer s.handlerMu.Unlock()
 	s.requestHandlers[msgType] = handler
+	return nil
 }
 
 // OffRequest unregisters the handler for a type
-func (s *Server) OffRequest(msgType string) {
+func (s *Server) OffRequest(msgType string) error {
+	if s.closed.Load() {
+		return fmt.Errorf("server closed")
+	}
 	s.handlerMu.Lock()
 	defer s.handlerMu.Unlock()
 	delete(s.requestHandlers, msgType)
+	return nil
 }
 
 // ClearClient drops all per-client state (cached session and replay history)
@@ -92,6 +104,9 @@ func (s *Server) ClearClient(clientID string) error {
 // Reserved types are handled internally; app requests are dispatched to the handler
 // registered via OnRequest
 func (s *Server) Receive(bytes []byte, write WriteFn) error {
+	if s.closed.Load() {
+		return fmt.Errorf("server closed")
+	}
 	env, err := unmarshalEnvelope(bytes)
 	if err != nil {
 		return fmt.Errorf("decode envelope: %w", err)
@@ -104,9 +119,9 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 		return write(s.handleRenewKeyAck(env))
 	}
 
-	session, errReply := s.sessionFor(env.OriginID, env.Type, env.RequestID)
-	if errReply != nil {
-		return write(errReply)
+	session, errorCode := s.sessionFor(env.OriginID)
+	if errorCode != "" {
+		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errorCode))
 	}
 
 	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
@@ -165,13 +180,16 @@ func (s *Server) sendResponse(env envelope, payload any, session *Session, write
 // Push encrypts and sends a message not triggered by an incoming request
 // RequestID on the wire is empty; clients distinguish pushes from replies by that
 func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) error {
+	if s.closed.Load() {
+		return fmt.Errorf("server closed")
+	}
 	if slices.Contains(reservedTypes, msgType) {
 		return fmt.Errorf("reserved message type: %s", msgType)
 	}
 
-	session, errReply := s.sessionFor(clientID, msgType, "")
-	if errReply != nil {
-		return fmt.Errorf("no session for %s", clientID)
+	session, errorCode := s.sessionFor(clientID)
+	if errorCode != "" {
+		return fmt.Errorf("no session for %s: %s", clientID, errorCode)
 	}
 
 	payloadBytes, err := cbor.Marshal(payload)
@@ -187,39 +205,38 @@ func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) erro
 
 // sessionFor returns the cached session for a client, deriving a fresh one when the
 // cached entry's keys no longer match the KeyStore
-// Returns (nil, errorReplyBytes) when the client is unknown or key derivation fails
-func (s *Server) sessionFor(clientID, msgTypeForError, requestID string) (*Session, []byte) {
+func (s *Server) sessionFor(clientID string) (*Session, string) {
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 
 	clientPub, ok := s.keyStore.GetClientPublicKey(clientID)
 	if !ok {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errNoClientKey)
+		return nil, errNoClientKey
 	}
 	priv, err := s.keyStore.GetPrivateKey()
 	if err != nil {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
+		return nil, errInvalidKey
 	}
 
 	// Reuse the cached session only if the key pair hasn't changed
 	if cached, ok := s.sessions[clientID]; ok && bytes.Equal(cached.privateKey, priv) && bytes.Equal(cached.clientPublicKey, clientPub) {
-		return cached.session, nil
+		return cached.session, ""
 	}
 
 	secret, err := deriveSharedSecret(priv, clientPub)
 	if err != nil {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
+		return nil, errInvalidKey
 	}
 	session, err := SessionFromKey(secret)
 	if err != nil {
-		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInternalError)
+		return nil, errInternalError
 	}
 	s.sessions[clientID] = &cachedSession{
 		session:         session,
 		privateKey:      append([]byte(nil), priv...),
 		clientPublicKey: append([]byte(nil), clientPub...),
 	}
-	return session, nil
+	return session, ""
 }
 
 // buildEncryptedReply produces a reply envelope carrying encrypted payload bytes
@@ -251,8 +268,17 @@ func (s *Server) buildProtocolError(clientID, requestID, requestType, code strin
 	return out
 }
 
-// Close stops background goroutines
+// Close stops background goroutines and releases per-client state
 func (s *Server) Close() error {
-	s.keys.close()
+	s.closeOnce.Do(func() {
+		s.closed.Store(true)
+		s.keys.close()
+		s.sessionMu.Lock()
+		s.sessions = make(map[string]*cachedSession)
+		s.sessionMu.Unlock()
+		s.handlerMu.Lock()
+		s.requestHandlers = make(map[string]RequestHandler)
+		s.handlerMu.Unlock()
+	})
 	return nil
 }

@@ -100,13 +100,14 @@ describe("Client push handlers", () => {
 		expect(calls).toEqual([]);
 	});
 
-	test("request, receive, and onPush throw after close", async () => {
+	test("request, receive, onPush, and offPush throw after close", async () => {
 		const client = makeClient();
 		client.close();
 
 		await expect(client.request("s", "t", {}, () => { })).rejects.toThrow(/Client closed/);
 		await expect(client.receive(errorEnvelope())).rejects.toThrow(/Client closed/);
 		expect(() => client.onPush("s", "tick", () => { })).toThrow(/Client closed/);
+		expect(() => client.offPush("s", "tick", () => { })).toThrow(/Client closed/);
 	});
 
 	test("close is idempotent", () => {

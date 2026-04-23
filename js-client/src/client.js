@@ -114,6 +114,7 @@ export class Client {
 	 * @param {PushHandler} handler
 	 */
 	offPush(serverId, type, handler) {
+		if (this.#closed) throw new Error("Client closed");
 		const byType = this.#pushHandlers.get(serverId);
 		if (!byType) return;
 		const list = byType.get(type);
@@ -207,9 +208,7 @@ export class Client {
 
 		// Step 1: renewKey encrypted with OLD session. No retry fallback — a decryption error
 		// here would incorrectly rotate into the previous key
-		await this.#exchange(
-			serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write, false
-		);
+		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write, false);
 
 		// Step 2: current key becomes previous, new becomes current
 		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);

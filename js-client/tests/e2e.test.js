@@ -11,9 +11,9 @@ import { generateKeypair } from "../src/crypto.js";
 const SERVER_PKG = fileURLToPath(new URL("../../go-server/cmd/test_server", import.meta.url));
 
 /**
- * @param {{ dropAck?: boolean, keyMaxAgeMs?: number, requestTimeoutMs?: number }} [opts]
+ * @param {{ dropAck?: boolean, keyMaxAgeMs?: number, requestTimeoutMs?: number, onWrite?: (bytes: Uint8Array) => void }} [opts]
  */
-async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs } = {}) {
+async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, onWrite } = {}) {
 	const serverKeypair = await rawKeypair();
 	const clientKeypair = await generateKeypair();
 
@@ -70,9 +70,12 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs } =
 		}
 	};
 
-	const client = new Client({ selfId: "client-1", keyStore, keyMaxAgeMs, requestTimeoutMs });
 	/** @param {Uint8Array} bytes */
-	const write = (bytes) => writeFrame(sock, bytes);
+	const write = (bytes) => {
+		onWrite?.(bytes);
+		writeFrame(sock, bytes);
+	};
+	const client = new Client({ selfId: "client-1", keyStore, keyMaxAgeMs, requestTimeoutMs });
 	readFrames(sock, (/** @type {Uint8Array} */ bytes) => client.receive(bytes));
 
 	return {
@@ -262,17 +265,14 @@ describe("e2e cross-language", () => {
 	});
 
 	test("surfaces a replayed request envelope as a REPLAY error on a matching push handler", async () => {
-		const harness = await spawnHarness();
-		h = harness;
-
 		/** @type {Uint8Array | null} */
 		let captured = null;
-		const capturingWrite = (/** @type {Uint8Array} */ bytes) => {
-			if (captured === null) captured = bytes;
-			harness.write(bytes);
-		};
+		const harness = await spawnHarness({
+			onWrite: (bytes) => { if (captured === null) captured = bytes; }
+		});
+		h = harness;
 
-		const first = await harness.client.request("server-1", "echo", { once: true }, capturingWrite);
+		const first = await harness.client.request("server-1", "echo", { once: true }, harness.write);
 		expect(first).toEqual({ once: true });
 
 		// Replayed envelope's requestId no longer matches a pending request, so it routes

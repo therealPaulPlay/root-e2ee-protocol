@@ -42,7 +42,7 @@ Methods:
 | `receive` | `bytes: Uint8Array` | `void` | Entry point for every inbound envelope. Host needs to call this for each message off the wire. |
 | `onPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Register a push handler scoped to `(serverId, type)`. Multiple handlers are supported and fire in registration order. |
 | `offPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Remove a previously-registered push handler. |
-| `close` | — | `void` | Call when the client is no longer needed so pending requests reject immediately instead of waiting for their timeout. The instance must not be reused afterwards. |
+| `close` | — | `void` | Call when the client is no longer needed so pending requests reject immediately instead of waiting for their timeout. |
 
 
 Parameter function types:
@@ -116,7 +116,7 @@ The host populates this struct of function fields and passes it to `NewServer`. 
 
 ### Struct: `ReplayStore`
 
-The host implements persistence for seen requestIDs. The library hands opaque bytes; the host writes them durably. A typical implementation uses an append-only file: `Append` writes one framed record with `O_APPEND + fsync`, `Save` atomically rewrites the file, `Load` returns the full file contents.
+The host implements persistence for seen requestIDs. The library hands opaque bytes; the host writes them durably. A typical implementation uses an append-only file: `Append` writes one framed record with `O_APPEND + fsync`, `Save` atomically rewrites the file, `Load` returns the full file contents. A `Load` error fails `NewServer`; `Append` / `Save` errors propagate to the caller and the library rolls back its in-memory state so the on-disk and in-memory records stay consistent.
 
 | Field | Signature | Expected behavior |
 |---|---|---|

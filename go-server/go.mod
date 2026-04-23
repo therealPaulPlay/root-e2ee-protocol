@@ -1,4 +1,4 @@
-module github.com/therealPaulPlay/root-e2ee-protocol/src/server
+module github.com/therealPaulPlay/root-e2ee-protocol/go-server
 
 go 1.25.5
 

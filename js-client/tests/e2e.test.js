@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "../src/client.js";
 import { generateKeypair } from "../src/crypto.js";
 
-const SERVER_PKG = fileURLToPath(new URL("../../server/cmd/test_server", import.meta.url));
+const SERVER_PKG = fileURLToPath(new URL("../../go-server/cmd/test_server", import.meta.url));
 
 /**
  * @param {{ dropAck?: boolean, keyMaxAgeMs?: number, requestTimeoutMs?: number }} [opts]

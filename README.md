@@ -9,7 +9,7 @@ End-to-end encrypted communication protocol with two parts: A JS client package,
 npm install root-e2ee-protocol
 
 # Go
-go get github.com/therealPaulPlay/root-e2ee-protocol/src/server
+go get github.com/therealPaulPlay/root-e2ee-protocol/go-server
 ```
 
 ## Model
@@ -80,7 +80,7 @@ Returned by `deriveSession`. Provides AES-256-GCM encryption for use cases outsi
 
 ## Go server
 
-Package: `github.com/therealPaulPlay/root-e2ee-protocol/src/server`, package name `rootproto`.
+Package: `github.com/therealPaulPlay/root-e2ee-protocol/go-server`, package name `rootproto`.
 
 ### Struct: `Server`
 
@@ -154,8 +154,8 @@ Provides AES-256-GCM encryption for use cases outside the request/response flow.
 
 ```sh
 # JS unit + cross-language e2e (the e2e suite spawns the Go test server over a Unix socket)
-cd src/client && npm install && npm test
+cd js-client && npm install && npm test
 
 # Go unit tests
-cd src/server && go test ./...
+cd go-server && go test ./...
 ```

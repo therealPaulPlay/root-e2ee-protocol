@@ -19,4 +19,4 @@ vendor/
 tsconfig.tsbuildinfo
 
 # Generated declaration files
-src/client/types/
+js-client/types/

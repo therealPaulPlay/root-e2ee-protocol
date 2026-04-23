@@ -37,7 +37,7 @@ import (
 	"syscall"
 
 	"github.com/fxamacker/cbor/v2"
-	rp "github.com/therealPaulPlay/root-e2ee-protocol/src/server"
+	rp "github.com/therealPaulPlay/root-e2ee-protocol/go-server"
 )
 
 func main() {

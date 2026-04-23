@@ -49,14 +49,14 @@ func TestOnRequestReplacesPriorHandler(t *testing.T) {
 	defer server.Close()
 
 	var calls []string
-	server.OnRequest("ping", func(string, []byte) any { calls = append(calls, "first"); return nil })
-	server.OnRequest("ping", func(string, []byte) any { calls = append(calls, "second"); return nil })
+	server.OnRequest("ping", func(string, []byte, RespondFn) any { calls = append(calls, "first"); return nil })
+	server.OnRequest("ping", func(string, []byte, RespondFn) any { calls = append(calls, "second"); return nil })
 
 	handler, ok := server.requestHandlers["ping"]
 	if !ok {
 		t.Fatal("expected a handler registered for ping")
 	}
-	handler("client", nil)
+	handler("client", nil, nil)
 	if strings.Join(calls, ",") != "second" {
 		t.Errorf("expected only the second handler to fire, got %v", calls)
 	}

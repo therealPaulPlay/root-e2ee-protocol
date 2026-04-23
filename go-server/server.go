@@ -19,10 +19,12 @@ type KeyStore struct {
 // WriteFn is the host-owned wire
 type WriteFn func(bytes []byte) error
 
-// RequestHandler processes a client request and returns the reply payload
-// Payload decrypted, but still-CBOR-encoded; the handler unmarshals into its own types
-// Hosts encode app-level results as they see fit; the library does not inspect the shape
-type RequestHandler func(clientID string, payload []byte) (replyPayload any)
+// RespondFn sends the response synchronously from inside the handler
+type RespondFn func(payload any) error
+
+// RequestHandler processes a client request
+// Either return the response payload, or call respond() to send it immediately (return value will be ignored)
+type RequestHandler func(clientID string, payload []byte, respond RespondFn) (responsePayload any)
 
 type Server struct {
 	selfID   string
@@ -125,16 +127,33 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errUnknownType))
 	}
 
-	replyPayload := handler(env.OriginID, plaintext)
-	replyBytes, err := cbor.Marshal(replyPayload)
-	if err != nil {
-		return fmt.Errorf("marshal reply payload: %w", err)
+	responded := false
+	respond := func(payload any) error {
+		if responded {
+			return fmt.Errorf("already sent response")
+		}
+		responded = true
+		return s.sendResponse(env, payload, session, write)
 	}
-	reply, err := s.buildEncryptedReply(env.OriginID, env.Type, replyBytes, env.RequestID, session)
+
+	returnValue := handler(env.OriginID, plaintext, respond)
+	if responded {
+		return nil
+	}
+	return s.sendResponse(env, returnValue, session, write)
+}
+
+// sendResponse CBOR-encodes the payload, encrypts it under the given session, and writes the envelope
+func (s *Server) sendResponse(env envelope, payload any, session *Session, write WriteFn) error {
+	payloadBytes, err := cbor.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal response payload: %w", err)
+	}
+	response, err := s.buildEncryptedReply(env.OriginID, env.Type, payloadBytes, env.RequestID, session)
 	if err != nil {
 		return err
 	}
-	return write(reply)
+	return write(response)
 }
 
 // Push encrypts and sends a message not triggered by an incoming request

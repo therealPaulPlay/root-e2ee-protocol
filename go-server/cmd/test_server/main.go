@@ -134,14 +134,14 @@ func main() {
 	}
 
 	// Register handlers (writeFn is closed over for trigger-push)
-	server.OnRequest("echo", func(_ string, payload []byte) any {
+	server.OnRequest("echo", func(_ string, payload []byte, _ rp.RespondFn) any {
 		var body any
 		if err := cbor.Unmarshal(payload, &body); err != nil {
 			return map[string]any{"ok": false, "error": err.Error()}
 		}
 		return body
 	})
-	server.OnRequest("add", func(_ string, payload []byte) any {
+	server.OnRequest("add", func(_ string, payload []byte, _ rp.RespondFn) any {
 		var req struct {
 			A int64 `cbor:"a"`
 			B int64 `cbor:"b"`
@@ -151,7 +151,7 @@ func main() {
 		}
 		return map[string]any{"sum": req.A + req.B}
 	})
-	server.OnRequest("trigger-push", func(clientID string, _ []byte) any {
+	server.OnRequest("trigger-push", func(clientID string, _ []byte, _ rp.RespondFn) any {
 		// Send an unsolicited push to the client, then reply normally
 		if err := server.Push(clientID, "tick", map[string]any{"n": 42}, writeFn); err != nil {
 			log.Printf("push failed: %v", err)
@@ -159,7 +159,7 @@ func main() {
 		}
 		return map[string]any{"ok": true}
 	})
-	server.OnRequest("push-under-stashed", func(clientID string, _ []byte) any {
+	server.OnRequest("push-under-stashed", func(clientID string, _ []byte, _ rp.RespondFn) any {
 		keyMu.Lock()
 		pub := append([]byte(nil), stashedClientPub...)
 		keyMu.Unlock()

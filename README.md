@@ -94,7 +94,7 @@ Constructor: `NewServer(selfID string, keyStore KeyStore, replayStore ReplayStor
 | `Push` | `clientID, msgType string`, `payload any`, `write WriteFn` | `error` | Server-initiated push to a specific client. Payload is any CBOR-serializable value. |
 | `OnRequest` | `msgType string`, `handler RequestHandler` | — | Register the handler for a client-request type. Only one handler per type; calling this twice for the same type replaces the prior handler. |
 | `OffRequest` | `msgType string` | — | Unregister the handler for a type. |
-| `ClearReplayHistory` | `clientID string` | `error` | Drop the given client's recorded requestIDs. Call on unpair so a future re-pairing starts clean. |
+| `ClearClient` | `clientID string` | `error` | Drop all per-client state (cached session and replay history). Call on unpair so a future re-pairing starts clean and memory is wiped. |
 
 Parameter function types:
 

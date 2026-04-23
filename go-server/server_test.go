@@ -263,8 +263,8 @@ func TestReplayTrackerRecoversFromTruncatedTail(t *testing.T) {
 	}
 }
 
-// Deleting a client compacts the log: a fresh Server after delete sees no history for that client
-func TestServerReloadAfterDeleteDropsClientHistory(t *testing.T) {
+// ClearClient drops both session and replay state; a fresh Server afterwards sees no history
+func TestClearClientDropsSessionAndReplayHistory(t *testing.T) {
 	store := fakeReplayStore()
 	keyStore := KeyStore{
 		GetPrivateKey:         func() ([]byte, error) { return nil, nil },
@@ -276,10 +276,16 @@ func TestServerReloadAfterDeleteDropsClientHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
 	}
+	// Seed both the session cache and the replay history for client-a
+	first.sessions["client-a"] = &cachedSession{}
 	first.replay.checkAndRecord("client-a", "id-1")
 	first.replay.checkAndRecord("client-b", "id-2")
-	if err := first.ClearReplayHistory("client-a"); err != nil {
-		t.Fatalf("ClearReplayHistory: %v", err)
+
+	if err := first.ClearClient("client-a"); err != nil {
+		t.Fatalf("ClearClient: %v", err)
+	}
+	if _, ok := first.sessions["client-a"]; ok {
+		t.Error("client-a's cached session should be dropped")
 	}
 	first.Close()
 

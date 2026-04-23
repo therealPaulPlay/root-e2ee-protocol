@@ -65,12 +65,6 @@ func NewServer(selfID string, keyStore KeyStore, replayStore ReplayStore) (*Serv
 	}, nil
 }
 
-// Close stops background goroutines
-func (s *Server) Close() error {
-	s.keys.close()
-	return nil
-}
-
 // OnRequest registers the handler for a client-request type
 // Only one handler per type; calling OnRequest twice for the same type replaces the prior handler
 func (s *Server) OnRequest(msgType string, handler RequestHandler) {
@@ -86,8 +80,11 @@ func (s *Server) OffRequest(msgType string) {
 	delete(s.requestHandlers, msgType)
 }
 
-// ClearReplayHistory drops all recorded requestIDs for the given client
-func (s *Server) ClearReplayHistory(clientID string) error {
+// ClearClient drops all per-client state (cached session and replay history)
+func (s *Server) ClearClient(clientID string) error {
+	s.sessionMu.Lock()
+	delete(s.sessions, clientID)
+	s.sessionMu.Unlock()
 	return s.replay.deleteClient(clientID)
 }
 
@@ -252,4 +249,10 @@ func (s *Server) buildProtocolError(clientID, requestID, requestType, code strin
 		Error:     code,
 	})
 	return out
+}
+
+// Close stops background goroutines
+func (s *Server) Close() error {
+	s.keys.close()
+	return nil
 }

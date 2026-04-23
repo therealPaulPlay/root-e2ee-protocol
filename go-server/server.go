@@ -1,6 +1,7 @@
 package rootproto
 
 import (
+	"bytes"
 	"fmt"
 	"slices"
 	"sync"
@@ -33,10 +34,18 @@ type Server struct {
 	keys     *keyManager
 
 	sessionMu sync.Mutex
-	sessions  map[string]*Session
+	sessions  map[string]*cachedSession
 
 	handlerMu       sync.RWMutex
 	requestHandlers map[string]RequestHandler
+}
+
+// cachedSession pairs a derived session with the key material that produced it
+// so sessionFor can detect and prune on key changes
+type cachedSession struct {
+	session         *Session
+	privateKey      []byte
+	clientPublicKey []byte
 }
 
 // NewServer constructs a server
@@ -51,7 +60,7 @@ func NewServer(selfID string, keyStore KeyStore, replayStore ReplayStore) (*Serv
 		keyStore:        keyStore,
 		replay:          replay,
 		keys:            newKeyManager(),
-		sessions:        make(map[string]*Session),
+		sessions:        make(map[string]*cachedSession),
 		requestHandlers: make(map[string]RequestHandler),
 	}, nil
 }
@@ -179,15 +188,12 @@ func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) erro
 	return write(bytes)
 }
 
-// sessionFor returns the cached session for a client, deriving one on cache miss
+// sessionFor returns the cached session for a client, deriving a fresh one when the
+// cached entry's keys no longer match the KeyStore
 // Returns (nil, errorReplyBytes) when the client is unknown or key derivation fails
 func (s *Server) sessionFor(clientID, msgTypeForError, requestID string) (*Session, []byte) {
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
-
-	if cached, ok := s.sessions[clientID]; ok {
-		return cached, nil
-	}
 
 	clientPub, ok := s.keyStore.GetClientPublicKey(clientID)
 	if !ok {
@@ -197,6 +203,12 @@ func (s *Server) sessionFor(clientID, msgTypeForError, requestID string) (*Sessi
 	if err != nil {
 		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
 	}
+
+	// Reuse the cached session only if the key pair hasn't changed
+	if cached, ok := s.sessions[clientID]; ok && bytes.Equal(cached.privateKey, priv) && bytes.Equal(cached.clientPublicKey, clientPub) {
+		return cached.session, nil
+	}
+
 	secret, err := deriveSharedSecret(priv, clientPub)
 	if err != nil {
 		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInvalidKey)
@@ -205,14 +217,12 @@ func (s *Server) sessionFor(clientID, msgTypeForError, requestID string) (*Sessi
 	if err != nil {
 		return nil, s.buildProtocolError(clientID, requestID, msgTypeForError, errInternalError)
 	}
-	s.sessions[clientID] = session
+	s.sessions[clientID] = &cachedSession{
+		session:         session,
+		privateKey:      append([]byte(nil), priv...),
+		clientPublicKey: append([]byte(nil), clientPub...),
+	}
 	return session, nil
-}
-
-func (s *Server) invalidateSession(clientID string) {
-	s.sessionMu.Lock()
-	defer s.sessionMu.Unlock()
-	delete(s.sessions, clientID)
 }
 
 // buildEncryptedReply produces a reply envelope carrying encrypted payload bytes

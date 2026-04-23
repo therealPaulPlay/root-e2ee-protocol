@@ -65,6 +65,73 @@ func TestOnRequestReplacesPriorHandler(t *testing.T) {
 	}
 }
 
+// Re-pairing can swap the stored client public key without going through renewKey; the next
+// sessionFor call must re-derive rather than return the stale cached session
+func TestSessionFromKeyChangesWhenStoredKeyChanges(t *testing.T) {
+	serverKeypair, err := GenerateKeypair()
+	if err != nil {
+		t.Fatalf("GenerateKeypair (server): %v", err)
+	}
+	firstClient, err := GenerateKeypair()
+	if err != nil {
+		t.Fatalf("GenerateKeypair (first client): %v", err)
+	}
+	secondClient, err := GenerateKeypair()
+	if err != nil {
+		t.Fatalf("GenerateKeypair (second client): %v", err)
+	}
+
+	// Mutable store simulating a re-pair flow that swaps the client's public key
+	currentClientPub := firstClient.PublicKey
+	server, err := NewServer("server", KeyStore{
+		GetPrivateKey:         func() ([]byte, error) { return serverKeypair.PrivateKey, nil },
+		GetClientPublicKey:    func(string) ([]byte, bool) { return currentClientPub, true },
+		CommitClientPublicKey: func(string, []byte) error { return nil },
+	}, fakeReplayStore())
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer server.Close()
+
+	firstSession, errReply := server.sessionFor("client-a", "test", "req-1")
+	if errReply != nil {
+		t.Fatalf("first sessionFor returned error envelope")
+	}
+
+	// Re-pair: swap the client's public key out-from-under the server
+	currentClientPub = secondClient.PublicKey
+
+	secondSession, errReply := server.sessionFor("client-a", "test", "req-2")
+	if errReply != nil {
+		t.Fatalf("second sessionFor returned error envelope")
+	}
+	if firstSession == secondSession {
+		t.Error("sessionFor should have re-derived after the stored client key changed")
+	}
+
+	// Verify the second session actually pairs with the new keys: a message encrypted under
+	// the new shared secret should decrypt successfully
+	expectedSecret, err := deriveSharedSecret(serverKeypair.PrivateKey, secondClient.PublicKey)
+	if err != nil {
+		t.Fatalf("deriveSharedSecret: %v", err)
+	}
+	expectedSession, err := SessionFromKey(expectedSecret)
+	if err != nil {
+		t.Fatalf("SessionFromKey: %v", err)
+	}
+	ciphertext, err := expectedSession.Encrypt([]byte("hello"), nil)
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	plaintext, err := secondSession.Decrypt(ciphertext, nil)
+	if err != nil {
+		t.Fatalf("Decrypt with re-derived session failed: %v", err)
+	}
+	if string(plaintext) != "hello" {
+		t.Errorf("unexpected plaintext: %q", plaintext)
+	}
+}
+
 func TestReplayTrackerDetectsDuplicatesPerClient(t *testing.T) {
 	tracker, err := newReplayTracker(fakeReplayStore())
 	if err != nil {

@@ -81,9 +81,6 @@ func (s *Server) handleRenewKeyAck(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
-	// Drop the cached old session before clearing the replay history so concurrent
-	// Receive calls can't accept an old-session message against an empty set
-	s.invalidateSession(env.OriginID)
 	if err := s.replay.deleteClient(env.OriginID); err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}

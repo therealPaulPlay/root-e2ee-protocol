@@ -1,5 +1,6 @@
 import { Encoder } from "cbor-x";
 import { deriveSession, computeAAD, generateKeypair } from "./crypto.js";
+import { bytesEqual } from "./utils.js";
 import {
 	RESERVED_TYPES,
 	ERR_DECRYPTION_FAILED,
@@ -212,7 +213,6 @@ export class Client {
 
 		// Step 2: current key becomes previous, new becomes current
 		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);
-		this.#sessions.delete(serverId);
 
 		// Step 3: ACK encrypted with NEW session. Non-fatal if the reply is lost;
 		// client keeps the previous key stored, and reverts to it on mismatch
@@ -246,7 +246,6 @@ export class Client {
 			if (!prev) throw error;
 
 			await this.#keyStore.revertToPrevious(serverId);
-			this.#sessions.delete(serverId);
 			return this.#roundtrip(serverId, type, payload, write);
 		}
 	}
@@ -345,12 +344,21 @@ export class Client {
 	 * @returns {Promise<import("./crypto.js").Session>}
 	 */
 	async #sessionFor(serverId) {
-		const cached = this.#sessions.get(serverId);
-		if (cached) return cached;
 		const current = await this.#keyStore.getCurrent(serverId);
 		if (!current) throw new Error(`No current key for server ${serverId}`);
+
+		// Reuse the cached session only if the key pair hasn't changed
+		const cached = this.#sessions.get(serverId);
+		if (cached && bytesEqual(cached.privateKey, current.privateKey) && bytesEqual(cached.serverPublicKey, current.serverPublicKey)) {
+			return cached.session;
+		}
+
 		const session = await deriveSession(current.privateKey, current.serverPublicKey);
-		this.#sessions.set(serverId, session);
+		this.#sessions.set(serverId, {
+			session,
+			privateKey: current.privateKey,
+			serverPublicKey: current.serverPublicKey
+		});
 		return session;
 	}
 

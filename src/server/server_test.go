@@ -1,21 +1,37 @@
 package rootproto
 
 import (
-	"fmt"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/fxamacker/cbor/v2"
 )
 
-func newTestServer() *Server {
-	return NewServer("server", KeyStore{
+func fakeReplayStore() ReplayStore {
+	var buf []byte
+	return ReplayStore{
+		Load:   func() ([]byte, error) { return buf, nil },
+		Append: func(entry []byte) error { buf = append(buf, entry...); return nil },
+		Save:   func(snapshot []byte) error { buf = snapshot; return nil },
+	}
+}
+
+func newTestServer(t *testing.T) *Server {
+	t.Helper()
+	server, err := NewServer("server", KeyStore{
 		GetPrivateKey:         func() ([]byte, error) { return nil, nil },
 		GetClientPublicKey:    func(string) ([]byte, bool) { return nil, false },
 		CommitClientPublicKey: func(string, []byte) error { return nil },
-	})
+	}, fakeReplayStore())
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	return server
 }
 
 func TestPushRejectsReservedTypes(t *testing.T) {
-	server := newTestServer()
+	server := newTestServer(t)
 	defer server.Close()
 
 	noopWrite := func([]byte) error { return nil }
@@ -29,7 +45,7 @@ func TestPushRejectsReservedTypes(t *testing.T) {
 }
 
 func TestOnRequestReplacesPriorHandler(t *testing.T) {
-	server := newTestServer()
+	server := newTestServer(t)
 	defer server.Close()
 
 	var calls []string
@@ -49,42 +65,166 @@ func TestOnRequestReplacesPriorHandler(t *testing.T) {
 	}
 }
 
-func TestReplayCacheDetectsDuplicates(t *testing.T) {
-	c := newReplayCache()
+func TestReplayTrackerDetectsDuplicatesPerClient(t *testing.T) {
+	tracker, err := newReplayTracker(fakeReplayStore())
+	if err != nil {
+		t.Fatalf("newReplayTracker: %v", err)
+	}
 
-	if c.check("id-1") {
-		t.Error("first sighting of id-1 should not be a replay")
+	if seen, _ := tracker.checkAndRecord("client-a", "id-1"); seen {
+		t.Error("first sighting of id-1 for client-a should not be a replay")
 	}
-	if !c.check("id-1") {
-		t.Error("second sighting of id-1 should be detected as a replay")
+	if seen, _ := tracker.checkAndRecord("client-a", "id-1"); !seen {
+		t.Error("second sighting of id-1 for client-a should be detected as a replay")
 	}
-	if c.check("id-2") {
-		t.Error("distinct id-2 should not be a replay")
+	if seen, _ := tracker.checkAndRecord("client-b", "id-1"); seen {
+		t.Error("id-1 under client-b should not collide with client-a")
 	}
 }
 
-func TestReplayCacheEvictsOldestAtCapacity(t *testing.T) {
-	c := newReplayCache()
-
-	// Fill to capacity with unique IDs
-	for i := 0; i < replayCacheSize; i++ {
-		if c.check(uniqueID(i)) {
-			t.Fatalf("fresh id at position %d unexpectedly flagged", i)
-		}
-	}
-	// The oldest insertion (id-0) is still in the cache right now
-	if !c.check(uniqueID(0)) {
-		t.Error("id-0 should still be in cache at exactly capacity")
+func TestReplayTrackerDeleteClient(t *testing.T) {
+	tracker, err := newReplayTracker(fakeReplayStore())
+	if err != nil {
+		t.Fatalf("newReplayTracker: %v", err)
 	}
 
-	// Insert one more fresh id. Since id-0's re-check was a pure lookup (no insert),
-	// the ring buffer head still points at the id-0 slot - The new insert evicts id-0
-	c.check("overflow-1")
-	if c.check(uniqueID(0)) {
-		t.Error("id-0 should have been evicted and accepted as fresh again")
+	tracker.checkAndRecord("client-a", "id-1")
+	tracker.checkAndRecord("client-b", "id-1")
+
+	if err := tracker.deleteClient("client-a"); err != nil {
+		t.Fatalf("deleteClient: %v", err)
+	}
+	if seen, _ := tracker.checkAndRecord("client-a", "id-1"); seen {
+		t.Error("id-1 for client-a should be accepted after delete")
+	}
+	if seen, _ := tracker.checkAndRecord("client-b", "id-1"); !seen {
+		t.Error("client-b's id-1 should still be recorded")
 	}
 }
 
-func uniqueID(i int) string {
-	return fmt.Sprintf("id-%d", i)
+// Key rotation clears the client's replay history as part of handleRenewKeyAck
+func TestRenewKeyAckClearsReplayHistory(t *testing.T) {
+	// Real P-256 keys so the renewKeyAck ECDH + AEAD path can run
+	serverKeypair, err := GenerateKeypair()
+	if err != nil {
+		t.Fatalf("GenerateKeypair: %v", err)
+	}
+	committed := make(map[string][]byte)
+	server, err := NewServer("server", KeyStore{
+		GetPrivateKey:         func() ([]byte, error) { return serverKeypair.PrivateKey, nil },
+		GetClientPublicKey:    func(id string) ([]byte, bool) { pub, ok := committed[id]; return pub, ok },
+		CommitClientPublicKey: func(id string, pub []byte) error { committed[id] = pub; return nil },
+	}, fakeReplayStore())
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	defer server.Close()
+
+	clientID := "client-a"
+
+	// Seed a requestID so we can verify it gets cleared
+	server.replay.checkAndRecord(clientID, "seeded-id")
+
+	// Buffer a pending new session as if handleRenewKey had run
+	newClientKeypair, err := GenerateKeypair()
+	if err != nil {
+		t.Fatalf("GenerateKeypair: %v", err)
+	}
+	newSession, err := DeriveSession(serverKeypair.PrivateKey, newClientKeypair.PublicKey)
+	if err != nil {
+		t.Fatalf("DeriveSession: %v", err)
+	}
+	server.keys.bufferPending(clientID, newClientKeypair.PublicKey, newSession)
+
+	// Build a valid renewKeyAck envelope encrypted under the new session
+	ackPayload, err := cbor.Marshal(map[string]any{"ack": true})
+	if err != nil {
+		t.Fatalf("marshal ack: %v", err)
+	}
+	aad := computeAAD("renewKeyAck", clientID, server.selfID)
+	ciphertext, err := newSession.Encrypt(ackPayload, aad)
+	if err != nil {
+		t.Fatalf("encrypt ack: %v", err)
+	}
+	ackEnv := envelope{
+		Type:      "renewKeyAck",
+		OriginID:  clientID,
+		TargetID:  server.selfID,
+		RequestID: "renew-1",
+		Payload:   ciphertext,
+	}
+
+	server.handleRenewKeyAck(ackEnv)
+
+	// After rotation, the seeded requestID should no longer be tracked
+	if seen, _ := server.replay.checkAndRecord(clientID, "seeded-id"); seen {
+		t.Error("seeded-id should be fresh after rotation (replay history not cleared)")
+	}
+}
+
+// A partially-written trailing record (simulating a mid-write crash) must not break Load
+// Valid records before the truncation are preserved regardless of how much of the tail was lost
+func TestReplayTrackerRecoversFromTruncatedTail(t *testing.T) {
+	for _, truncateBy := range []int{1, 2, 3, 5, 10, 20} {
+		t.Run("truncate="+strconv.Itoa(truncateBy), func(t *testing.T) {
+			var buf []byte
+			store := ReplayStore{
+				Load:   func() ([]byte, error) { return buf, nil },
+				Append: func(entry []byte) error { buf = append(buf, entry...); return nil },
+				Save:   func(snapshot []byte) error { buf = snapshot; return nil },
+			}
+			tracker, err := newReplayTracker(store)
+			if err != nil {
+				t.Fatalf("newReplayTracker: %v", err)
+			}
+			tracker.checkAndRecord("client-a", "id-1")
+			tracker.checkAndRecord("client-a", "id-2")
+
+			buf = buf[:len(buf)-truncateBy]
+
+			reloaded, err := newReplayTracker(store)
+			if err != nil {
+				t.Fatalf("newReplayTracker after truncation: %v", err)
+			}
+			if seen, _ := reloaded.checkAndRecord("client-a", "id-1"); !seen {
+				t.Error("id-1 (fully persisted) should survive truncation")
+			}
+			if seen, _ := reloaded.checkAndRecord("client-a", "id-2"); seen {
+				t.Error("id-2 (partially written) should be treated as unseen")
+			}
+		})
+	}
+}
+
+// Deleting a client compacts the log: a fresh Server after delete sees no history for that client
+func TestServerReloadAfterDeleteDropsClientHistory(t *testing.T) {
+	store := fakeReplayStore()
+	keyStore := KeyStore{
+		GetPrivateKey:         func() ([]byte, error) { return nil, nil },
+		GetClientPublicKey:    func(string) ([]byte, bool) { return nil, false },
+		CommitClientPublicKey: func(string, []byte) error { return nil },
+	}
+
+	first, err := NewServer("server", keyStore, store)
+	if err != nil {
+		t.Fatalf("NewServer: %v", err)
+	}
+	first.replay.checkAndRecord("client-a", "id-1")
+	first.replay.checkAndRecord("client-b", "id-2")
+	if err := first.ClearReplayHistory("client-a"); err != nil {
+		t.Fatalf("ClearReplayHistory: %v", err)
+	}
+	first.Close()
+
+	second, err := NewServer("server", keyStore, store)
+	if err != nil {
+		t.Fatalf("NewServer (reload): %v", err)
+	}
+	defer second.Close()
+	if seen, _ := second.replay.checkAndRecord("client-a", "id-1"); seen {
+		t.Error("client-a's id-1 should be fresh after delete+reload")
+	}
+	if seen, _ := second.replay.checkAndRecord("client-b", "id-2"); !seen {
+		t.Error("client-b's id-2 should survive delete of client-a")
+	}
 }

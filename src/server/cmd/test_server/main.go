@@ -2,22 +2,24 @@
 // Framing: 4-byte big-endian length prefix + raw envelope bytes
 //
 // CLI flags:
-//   -socket <path>            UDS path to listen on
-//   -self-id <string>         server's own ID
-//   -private-key <hex>        server's 32-byte private key
-//   -client-id <string>       the single paired client's ID
-//   -client-pub <hex>         the client's 65-byte public key
-//   -drop-ack                 if set, the server suppresses renewKeyAckResult to simulate a lost ACK
+//
+//	-socket <path>            UDS path to listen on
+//	-self-id <string>         server's own ID
+//	-private-key <hex>        server's 32-byte private key
+//	-client-id <string>       the single paired client's ID
+//	-client-pub <hex>         the client's 65-byte public key
+//	-drop-ack                 if set, the server suppresses renewKeyAckResult to simulate a lost ACK
 //
 // Registered handlers (so the JS test can exercise them):
-//   echo                  returns the incoming payload unchanged
-//   add                   expects {a, b} and returns {sum}
-//   trigger-push          sends a server Push of type "tick" carrying {n: 42}, then replies {ok: true}
-//   push-under-stashed    builds and writes a push envelope encrypted with the stashed pre-renewal
-//                         session, bypassing the server's live session cache. The stash is taken
-//                         automatically inside CommitClientPublicKey just before a key rotation,
-//                         so this handler exercises the case where an in-flight push from before
-//                         a renewal arrives after the client has already committed a new key
+//
+//	echo                  returns the incoming payload unchanged
+//	add                   expects {a, b} and returns {sum}
+//	trigger-push          sends a server Push of type "tick" carrying {n: 42}, then replies {ok: true}
+//	push-under-stashed    builds and writes a push envelope encrypted with the stashed pre-renewal
+//	                      session, bypassing the server's live session cache. The stash is taken
+//	                      automatically inside CommitClientPublicKey just before a key rotation,
+//	                      so this handler exercises the case where an in-flight push from before
+//	                      a renewal arrives after the client has already committed a new key
 package main
 
 import (
@@ -88,7 +90,18 @@ func main() {
 		},
 	}
 
-	server := rp.NewServer(*selfID, keyStore)
+	// Frames are processed sequentially, so the ReplayStore doesn't need its own lock
+	var replayBuf []byte
+	replayStore := rp.ReplayStore{
+		Load:   func() ([]byte, error) { return replayBuf, nil },
+		Append: func(entry []byte) error { replayBuf = append(replayBuf, entry...); return nil },
+		Save:   func(snapshot []byte) error { replayBuf = snapshot; return nil },
+	}
+
+	server, err := rp.NewServer(*selfID, keyStore, replayStore)
+	if err != nil {
+		log.Fatalf("new server: %v", err)
+	}
 	defer server.Close()
 
 	// Clean up any leftover socket

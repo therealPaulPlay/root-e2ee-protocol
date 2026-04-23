@@ -84,7 +84,7 @@ Package: `github.com/therealPaulPlay/root-e2ee-protocol/src/server`, package nam
 
 ### Struct: `Server`
 
-Constructor: `NewServer(selfID string, keyStore KeyStore) *Server`.
+Constructor: `NewServer(selfID string, keyStore KeyStore, replayStore ReplayStore) (*Server, error)`.
 
 | Method | Parameters | Returns | Description |
 |---|---|---|---|
@@ -93,6 +93,7 @@ Constructor: `NewServer(selfID string, keyStore KeyStore) *Server`.
 | `Push` | `clientID, msgType string`, `payload any`, `write WriteFn` | `error` | Server-initiated push to a specific client. Payload is any CBOR-serializable value. |
 | `OnRequest` | `msgType string`, `handler RequestHandler` | — | Register the handler for a client-request type. Only one handler per type; calling this twice for the same type replaces the prior handler. |
 | `OffRequest` | `msgType string` | — | Unregister the handler for a type. |
+| `ClearReplayHistory` | `clientID string` | `error` | Drop the given client's recorded requestIDs. Call on unpair so a future re-pairing starts clean. |
 
 Parameter function types:
 
@@ -110,6 +111,18 @@ The host populates this struct of function fields and passes it to `NewServer`. 
 | `GetPrivateKey` | `func() ([]byte, error)` | Return the server's long-lived private key. One key is shared across all clients. |
 | `GetClientPublicKey` | `func(clientID string) ([]byte, bool)` | Return the current public key for the named client. Return `(nil, false)` if the client is unknown. |
 | `CommitClientPublicKey` | `func(clientID string, newPublicKey []byte) error` | Persist a client's new public key. |
+
+### Struct: `ReplayStore`
+
+The host implements persistence for seen requestIDs. The library hands opaque bytes; the host writes them durably. A typical implementation uses an append-only file: `Append` writes one framed record with `O_APPEND + fsync`, `Save` atomically rewrites the file, `Load` returns the full file contents.
+
+| Field | Signature | Expected behavior |
+|---|---|---|
+| `Load` | `func() ([]byte, error)` | Return everything the host has persisted, or `nil` on first boot. |
+| `Append` | `func(entry []byte) error` | Append a single framed record to durable storage. Any delay between accept and durable save is a replay window on crash. |
+| `Save` | `func(snapshot []byte) error` | Replace durable storage with the given snapshot. |
+
+Record framing includes a per-record CRC, so a crash during `Append` is detected at the next `Load` and the truncated tail is discarded.
 
 ### Struct: `Keypair`
 

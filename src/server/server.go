@@ -27,8 +27,8 @@ type RequestHandler func(clientID string, payload []byte) (replyPayload any)
 type Server struct {
 	selfID   string
 	keyStore KeyStore
+	replay   *replayTracker
 	keys     *keyManager
-	replay   *replayCache
 
 	sessionMu sync.Mutex
 	sessions  map[string]*Session
@@ -39,15 +39,19 @@ type Server struct {
 
 // NewServer constructs a server
 // Close when the host shuts down to stop the background key-cleanup goroutine
-func NewServer(selfID string, keyStore KeyStore) *Server {
+func NewServer(selfID string, keyStore KeyStore, replayStore ReplayStore) (*Server, error) {
+	replay, err := newReplayTracker(replayStore)
+	if err != nil {
+		return nil, fmt.Errorf("load replay state: %w", err)
+	}
 	return &Server{
 		selfID:          selfID,
 		keyStore:        keyStore,
+		replay:          replay,
 		keys:            newKeyManager(),
-		replay:          newReplayCache(),
 		sessions:        make(map[string]*Session),
 		requestHandlers: make(map[string]RequestHandler),
-	}
+	}, nil
 }
 
 // Close stops background goroutines
@@ -69,6 +73,11 @@ func (s *Server) OffRequest(msgType string) {
 	s.handlerMu.Lock()
 	defer s.handlerMu.Unlock()
 	delete(s.requestHandlers, msgType)
+}
+
+// ClearReplayHistory drops all recorded requestIDs for the given client
+func (s *Server) ClearReplayHistory(clientID string) error {
+	return s.replay.deleteClient(clientID)
 }
 
 // Receive is the entry point for every inbound envelope from the transport layer
@@ -99,8 +108,14 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	}
 
 	// Reject replays: an authenticated ciphertext with a requestId we've already seen
-	if env.RequestID != "" && s.replay.check(env.RequestID) {
-		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errReplay))
+	if env.RequestID != "" {
+		seen, err := s.replay.checkAndRecord(env.OriginID, env.RequestID)
+		if err != nil {
+			return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError))
+		}
+		if seen {
+			return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errReplay))
+		}
 	}
 
 	s.handlerMu.RLock()

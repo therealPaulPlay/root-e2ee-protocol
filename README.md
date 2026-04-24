@@ -85,7 +85,17 @@ Package: `github.com/therealPaulPlay/root-e2ee-protocol/go-server`, package name
 
 ### Struct: `Server`
 
-Constructor: `NewServer(selfID string, keyStore KeyStore, replayStore ReplayStore) (*Server, error)`.
+Constructed via `NewServer` with the following parameters.
+
+| Parameter | Type | Description |
+|---|---|---|
+| `selfID` | `string` | The server's own ID. Checked against `targetId` on every inbound envelope. |
+| `keyStore` | `KeyStore` | Host-populated struct (see below) that owns key persistence. |
+| `replayStore` | `ReplayStore` | Host-populated struct (see below) that persists seen requestIDs for replay protection. |
+
+Returns `(*Server, error)`. A `Load` error from the replay store fails construction.
+
+Methods:
 
 | Method | Parameters | Returns | Description |
 |---|---|---|---|

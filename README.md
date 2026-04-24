@@ -31,14 +31,14 @@ Constructor accepts a single object with the following properties.
 |---|---|---|
 | `selfId` | `string` | The client's own ID. Sent as `originId` on every outbound envelope. |
 | `keyStore` | `KeyStore` | Host-implemented object (see below) that owns key persistence. |
-| `requestTimeoutMs` | `number?` | How long `request` waits for a matching reply before rejecting. Default `10000`. |
+| `requestTimeoutMs` | `number?` | How long `request` waits for a matching response before rejecting. Default `10000`. |
 | `keyMaxAgeMs` | `number?` | When the current key's `createdAt` is older than this, `request` runs a renewal handshake before sending. Default `300000`. |
 
 Methods:
 
 | Method | Parameters | Returns | Description |
 |---|---|---|---|
-| `request` | `serverId: string`, `type: string`, `payload: any`, `write: WriteFn` | `Promise<any>` | Encrypt and send a request, resolve with the decoded reply payload. Rejects on protocol-level failures. |
+| `request` | `serverId: string`, `type: string`, `payload: any`, `write: WriteFn` | `Promise<any>` | Encrypt and send a request, resolve with the decoded response payload. Rejects on protocol-level failures. |
 | `receive` | `bytes: Uint8Array` | `void` | Entry point for every inbound envelope. Host needs to call this for each message off the wire. |
 | `onPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Register a push handler scoped to `(serverId, type)`. Multiple handlers are supported and fire in registration order. |
 | `offPush` | `serverId: string`, `type: string`, `handler: PushHandler` | `void` | Remove a previously-registered push handler. |

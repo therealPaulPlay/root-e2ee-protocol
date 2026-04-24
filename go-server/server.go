@@ -111,6 +111,9 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	if err != nil {
 		return fmt.Errorf("decode envelope: %w", err)
 	}
+	if env.TargetID != s.selfID {
+		return fmt.Errorf("envelope targetId does not match selfID")
+	}
 
 	switch env.Type {
 	case msgRenewKey:
@@ -170,7 +173,7 @@ func (s *Server) sendResponse(env envelope, payload any, session *Session, write
 	if err != nil {
 		return fmt.Errorf("marshal response payload: %w", err)
 	}
-	response, err := s.buildEncryptedReply(env.OriginID, env.Type, payloadBytes, env.RequestID, session)
+	response, err := s.buildEncryptedResponse(env.OriginID, env.Type, payloadBytes, env.RequestID, session)
 	if err != nil {
 		return err
 	}
@@ -196,7 +199,7 @@ func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) erro
 	if err != nil {
 		return fmt.Errorf("marshal payload: %w", err)
 	}
-	bytes, err := s.buildEncryptedReply(clientID, msgType, payloadBytes, "", session)
+	bytes, err := s.buildEncryptedResponse(clientID, msgType, payloadBytes, "", session)
 	if err != nil {
 		return err
 	}
@@ -239,9 +242,9 @@ func (s *Server) sessionFor(clientID string) (*Session, string) {
 	return session, ""
 }
 
-// buildEncryptedReply produces a reply envelope carrying encrypted payload bytes
-// Pass nil payload for an empty-body success reply
-func (s *Server) buildEncryptedReply(clientID, msgType string, payload []byte, requestID string, session *Session) ([]byte, error) {
+// buildEncryptedResponse produces a response envelope carrying encrypted payload bytes
+// Pass nil payload for an empty-body success response
+func (s *Server) buildEncryptedResponse(clientID, msgType string, payload []byte, requestID string, session *Session) ([]byte, error) {
 	aad := computeAAD(msgType, s.selfID, clientID)
 	ciphertext, err := session.Encrypt(payload, aad)
 	if err != nil {

@@ -48,7 +48,7 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 
 	s.keys.bufferPending(env.OriginID, req.NewPublicKey, newSession)
 
-	out, err := s.buildEncryptedReply(env.OriginID, env.Type, nil, env.RequestID, oldSession)
+	out, err := s.buildEncryptedResponse(env.OriginID, env.Type, nil, env.RequestID, oldSession)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
@@ -85,7 +85,7 @@ func (s *Server) handleRenewKeyAck(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
-	out, err := s.buildEncryptedReply(env.OriginID, env.Type, nil, env.RequestID, pending.session)
+	out, err := s.buildEncryptedResponse(env.OriginID, env.Type, nil, env.RequestID, pending.session)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}

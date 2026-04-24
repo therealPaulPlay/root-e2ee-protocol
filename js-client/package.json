@@ -1,6 +1,6 @@
 {
   "name": "root-e2ee-protocol",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "End-to-end encrypted request/response protocol for ROOT.",
   "type": "module",
   "main": "./src/index.js",

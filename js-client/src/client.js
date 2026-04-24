@@ -153,7 +153,13 @@ export class Client {
 	 */
 	async receive(bytes) {
 		if (this.#closed) throw new Error("Client closed");
-		const env = cbor.decode(bytes);
+		let env;
+		try {
+			env = cbor.decode(bytes);
+		} catch (cause) {
+			throw new Error("Malformed envelope", { cause });
+		}
+		if (env.targetId !== this.#selfId) throw new Error("Envelope targetId does not match selfId");
 		const result = await this.#decodeEnvelope(env, env.originId);
 
 		const pendingRequestId = env.requestId;
@@ -213,7 +219,7 @@ export class Client {
 		// Step 2: current key becomes previous, new becomes current
 		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);
 
-		// Step 3: ACK encrypted with NEW session. Non-fatal if the reply is lost;
+		// Step 3: ACK encrypted with NEW session. Non-fatal if the response is lost;
 		// client keeps the previous key stored, and reverts to it on mismatch
 		try {
 			await this.#exchange(serverId, "renewKeyAck", { ack: true }, write, false);
@@ -221,7 +227,7 @@ export class Client {
 	}
 
 	/**
-	 * Encrypt, send, await the reply
+	 * Encrypt, send, await the response
 	 * If retryOnServerDecryptionFailure is true and the server reports DECRYPTION_FAILED,
 	 * reverts to the previous key and runs one additional exchange
 	 * Resolves with the decoded payload, rejects with {@link RelayError} on protocol errors
@@ -251,7 +257,7 @@ export class Client {
 
 	/**
 	 * Encrypt and write the envelope, register a pending entry keyed by requestId,
-	 * and return a Promise resolved by receive() when the matching reply arrives
+	 * and return a Promise resolved by receive() when the matching response arrives
 	 *
 	 * @param {string} serverId
 	 * @param {string} type
@@ -271,7 +277,7 @@ export class Client {
 			payload: await session.encrypt(cbor.encode(payload), aad)
 		});
 
-		const reply = new Promise((resolve, reject) => {
+		const responsePromise = new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {
 				this.#pending.delete(requestId);
 				reject(new Error(`Request ${type} timed out after ${this.#requestTimeoutMs}ms`));
@@ -279,8 +285,17 @@ export class Client {
 			this.#pending.set(requestId, { resolve, reject, timeout });
 		});
 
-		write(envelope);
-		return reply;
+		try {
+			write(envelope);
+		} catch (err) {
+			const entry = this.#pending.get(requestId);
+			if (entry) {
+				clearTimeout(entry.timeout);
+				this.#pending.delete(requestId);
+			}
+			throw err;
+		}
+		return responsePromise;
 	}
 
 	/**

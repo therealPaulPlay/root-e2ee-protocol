@@ -174,14 +174,14 @@ describe("e2e cross-language", () => {
 
 	test("roundtrips an echo request", async () => {
 		h = await spawnHarness();
-		const reply = await h.client.request("server-1", "echo", { hello: "world" }, h.write);
-		expect(reply).toEqual({ hello: "world" });
+		const response = await h.client.request("server-1", "echo", { hello: "world" }, h.write);
+		expect(response).toEqual({ hello: "world" });
 	});
 
 	test("roundtrips an add request with structured CBOR", async () => {
 		h = await spawnHarness();
-		const reply = await h.client.request("server-1", "add", { a: 3, b: 4 }, h.write);
-		expect(reply).toEqual({ sum: 7 });
+		const response = await h.client.request("server-1", "add", { a: 3, b: 4 }, h.write);
+		expect(response).toEqual({ sum: 7 });
 	});
 
 	test("throws RelayError(UNKNOWN_TYPE) for unregistered request types", async () => {
@@ -195,8 +195,8 @@ describe("e2e cross-language", () => {
 		/** @type {any[]} */
 		const pushes = [];
 		h.client.onPush("server-1", "tick", (payload) => { pushes.push(payload); });
-		const reply = await h.client.request("server-1", "trigger-push", {}, h.write);
-		expect(reply).toEqual({ ok: true });
+		const response = await h.client.request("server-1", "trigger-push", {}, h.write);
+		expect(response).toEqual({ ok: true });
 		expect(pushes).toEqual([{ n: 42 }]);
 	});
 
@@ -226,8 +226,8 @@ describe("e2e cross-language", () => {
 		// First request triggers a renewal -> server drops renewKeyAckResult -> from the server's
 		// pov the key was never committed -> next real request encrypts with the new key ->
 		// server can't decrypt -> returns DECRYPTION_FAILED -> client reverts to previous and retries
-		const reply = await h.client.request("server-1", "echo", { hi: true }, h.write);
-		expect(reply).toEqual({ hi: true });
+		const response = await h.client.request("server-1", "echo", { hi: true }, h.write);
+		expect(response).toEqual({ hi: true });
 		expect(h.keyState.current.privateKey).toEqual(originalPriv);
 		expect(h.keyState.previous).toBeNull();
 	});

@@ -47,7 +47,7 @@ func main() {
 		privKeyHex  = flag.String("private-key", "", "server private key, hex-encoded (32 bytes)")
 		clientID    = flag.String("client-id", "", "paired client ID")
 		clientPub   = flag.String("client-pub", "", "client public key, hex-encoded (65 bytes)")
-		dropACKFlag = flag.Bool("drop-ack", false, "if set, the server suppresses the renewKeyAck reply to simulate a lost ACK")
+		dropACKFlag = flag.Bool("drop-ack", false, "if set, the server suppresses the renewKeyAck response to simulate a lost ACK")
 	)
 	flag.Parse()
 
@@ -152,7 +152,7 @@ func main() {
 		return map[string]any{"sum": req.A + req.B}
 	})
 	server.OnRequest("trigger-push", func(clientID string, _ []byte, _ rp.RespondFn) any {
-		// Send an unsolicited push to the client, then reply normally
+		// Send an unsolicited push to the client, then response normally
 		if err := server.Push(clientID, "tick", map[string]any{"n": 42}, writeFn); err != nil {
 			log.Printf("push failed: %v", err)
 			return map[string]any{"ok": false, "error": err.Error()}

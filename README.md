@@ -49,7 +49,7 @@ Parameter function types:
 
 | Type | Signature | Description |
 |---|---|---|
-| `WriteFn` | `(bytes: Uint8Array) => void` | Host-provided function that writes envelope bytes onto the wire. Called by the library from inside `request`. |
+| `WriteFn` | `(bytes: Uint8Array) => void \| Promise<void>` | Host-provided function that writes envelope bytes onto the wire. Called by the library from inside `request`. |
 | `PushHandler` | `(payload: any, error: RelayError \| null) => void \| Promise<void>` | Registered via `onPush`, fires for server-initiated messages of a given `(serverId, type)`. On protocol errors, `error` is set. |
 
 ### Type: `KeyStore`

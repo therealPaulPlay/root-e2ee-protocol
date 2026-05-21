@@ -22,7 +22,7 @@ export class Session {
 	/**
 	 * @param {Uint8Array} data
 	 * @param {Uint8Array} [aad]
-	 * @returns {Promise<Uint8Array>} `nonce(12) || ciphertext || tag(16)`
+	 * @returns {Promise<Uint8Array>} nonce(12) || ciphertext || tag(16)
 	 */
 	async encrypt(data, aad) {
 		const nonce = crypto.getRandomValues(new Uint8Array(12));
@@ -37,7 +37,7 @@ export class Session {
 	}
 
 	/**
-	 * @param {Uint8Array} bytes `nonce(12) || ciphertext || tag(16)`
+	 * @param {Uint8Array} bytes nonce(12) || ciphertext || tag(16)
 	 * @param {Uint8Array} [aad]
 	 * @returns {Promise<Uint8Array>}
 	 */
@@ -66,7 +66,7 @@ export async function generateKeypair() {
 }
 
 /**
- * Derive an AES-GCM `Session` via ECDH between your private key and the other side's public key
+ * Derive an AES-GCM Session via ECDH between your private key and the other side's public key
  * @param {Uint8Array} privateKey PKCS8 DER
  * @param {Uint8Array} publicKey Raw uncompressed SEC1 (65 bytes)
  * @returns {Promise<Session>}
@@ -113,7 +113,7 @@ export async function deriveSession(privateKey, publicKey) {
 }
 
 /**
- * Compute AES-GCM AAD binding envelope metadata: `SHA256(type|originId|targetId)`
+ * Compute AES-GCM AAD binding envelope metadata and return as SHA256(type|originId|targetId)
  * @param {string} msgType
  * @param {string} originId
  * @param {string} targetId

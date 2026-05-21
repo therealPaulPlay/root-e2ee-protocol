@@ -121,7 +121,7 @@ func (s *Session) Decrypt(ciphertext, aad []byte) ([]byte, error) {
 	return s.gcm.Open(nil, nonce, body, aad)
 }
 
-// computeAAD binds envelope metadata to the ciphertext: SHA256(type|originId|targetId)
+// computeAAD binds envelope metadata to the ciphertext SHA256(type|originId|targetId)
 func computeAAD(msgType, originID, targetID string) []byte {
 	h := sha256.Sum256([]byte(msgType + "|" + originID + "|" + targetID))
 	return h[:]

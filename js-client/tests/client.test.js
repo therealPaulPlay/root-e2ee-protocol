@@ -116,6 +116,26 @@ describe("Client push handlers", () => {
 		client.close(); // should not throw
 	});
 
+	// An async write that rejects must surface as a request rejection, not an unhandled rejection
+	test("a rejecting async write surfaces as a request rejection", async () => {
+		const serverKeypair = await generateKeypair();
+		const clientKeypair = await generateKeypair();
+		const client = new Client({
+			selfId: "c",
+			keyStore: {
+				async getCurrent() {
+					return { privateKey: clientKeypair.privateKey, serverPublicKey: serverKeypair.publicKey, createdAt: Date.now() };
+				},
+				async getPrevious() { return null; },
+				async commitNewKey() { },
+				async revertToPrevious() { }
+			}
+		});
+		const write = async () => { throw new Error("transport down"); };
+
+		await expect(client.request("s", "echo", { n: 1 }, write)).rejects.toThrow(/transport down/);
+	});
+
 	// Re-pairing can swap the stored keys without the library's knowledge; next request
 	// must re-derive the session from the new keys instead of using the cached stale one
 	test("session re-derives when KeyStore keys change out-from-under it", async () => {

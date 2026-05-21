@@ -9,9 +9,8 @@ import (
 )
 
 // ReplayStore is the host's callback seam for persisting seen requestIDs
-// Append is called after every accepted message; Save replaces the persisted
-// state on client deletion; Load returns the concatenation of every record
-// the host has persisted
+// Append runs after every accepted message, Save replaces the persisted state
+// on client deletion, and Load returns every record the host has persisted
 type ReplayStore struct {
 	Load   func() ([]byte, error)
 	Append func(entry []byte) error
@@ -71,7 +70,7 @@ func (t *replayTracker) deleteClient(clientID string) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	delete(t.sets, clientID)
-	// Create snapshot of the state & save
+	// Snapshot the remaining state and save it
 	snapshot, err := encodeSnapshotRecord(t.sets)
 	if err != nil {
 		return err
@@ -79,7 +78,7 @@ func (t *replayTracker) deleteClient(clientID string) error {
 	return t.store.Save(snapshot)
 }
 
-// Subsequent, single entry
+// encodeEntryRecord encodes a subsequent, single entry
 func encodeEntryRecord(clientID, requestID string) ([]byte, error) {
 	payload, err := cbor.Marshal([]string{clientID, requestID})
 	if err != nil {
@@ -88,7 +87,7 @@ func encodeEntryRecord(clientID, requestID string) ([]byte, error) {
 	return frameRecord(kindEntry, payload), nil
 }
 
-// Full snapshot of all entries
+// encodeSnapshotRecord encodes a full snapshot of all entries
 func encodeSnapshotRecord(sets map[string]map[string]struct{}) ([]byte, error) {
 	flat := make(map[string][]string, len(sets))
 	for clientID, set := range sets {
@@ -105,7 +104,7 @@ func encodeSnapshotRecord(sets map[string]map[string]struct{}) ([]byte, error) {
 	return frameRecord(kindSnapshot, payload), nil
 }
 
-// Record framing: [kind 1B][varint length][payload][CRC32 4B over kind+length+payload]
+// frameRecord lays out a record as [kind 1B][varint length][payload][CRC32 4B]
 // The trailing CRC distinguishes a complete record from a crash-truncated one
 func frameRecord(kind byte, payload []byte) []byte {
 	var lenBuf [binary.MaxVarintLen64]byte
@@ -123,10 +122,9 @@ func frameRecord(kind byte, payload []byte) []byte {
 	return append(body, crcBuf[:]...)
 }
 
-// parseReplayLog walks a concatenation of framed records and returns the
-// reconstructed per-client sets
-// Per-record CRC means a truncated or corrupted trailing record stops parsing
-// cleanly; the stale tail is compacted out on the next Save
+// parseReplayLog rebuilds the per-client sets from a stream of framed records
+// A truncated or corrupt trailing record stops parsing cleanly and is dropped
+// on the next Save
 func parseReplayLog(data []byte) (map[string]map[string]struct{}, error) {
 	sets := make(map[string]map[string]struct{})
 	for len(data) > 0 {

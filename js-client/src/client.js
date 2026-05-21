@@ -36,7 +36,7 @@ const cbor = new Encoder(cborOptions);
  * @property {(serverId: string) => Promise<void>} revertToPrevious
  */
 
-/** @typedef {(bytes: Uint8Array) => void} WriteFn */
+/** @typedef {(bytes: Uint8Array) => void | Promise<void>} WriteFn */
 
 /**
  * Handler for server-initiated pushes
@@ -141,12 +141,12 @@ export class Client {
 		if (this.#closed) throw new Error("Client closed");
 		if (RESERVED_TYPES.includes(type)) throw new Error(`Reserved message type: ${type}`);
 		await this.#ensureKeyFresh(serverId, write);
-		return this.#exchange(serverId, type, payload, write, true);
+		return this.#exchange(serverId, type, payload, write);
 	}
 
 	/**
 	 * Entry point for every inbound envelope from the transport layer
-	 * Replies to pending requests are resolved internally; everything else is dispatched
+	 * Replies to pending requests are resolved internally, everything else is dispatched
 	 * to registered push handlers
 	 *
 	 * @param {Uint8Array} bytes
@@ -212,38 +212,34 @@ export class Client {
 
 		const newKeypair = await generateKeypair();
 
-		// Step 1: renewKey encrypted with OLD session. No retry fallback — a decryption error
-		// here would incorrectly rotate into the previous key
-		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write, false);
+		// Step 1: renewKey encrypted with OLD session
+		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write);
 
 		// Step 2: current key becomes previous, new becomes current
 		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);
 
-		// Step 3: ACK encrypted with NEW session. Non-fatal if the response is lost;
-		// client keeps the previous key stored, and reverts to it on mismatch
+		// Step 3: ACK encrypted with NEW session
+		// Non-fatal if the response is lost, client keeps the previous key stored and reverts to it on mismatch
 		try {
-			await this.#exchange(serverId, "renewKeyAck", { ack: true }, write, false);
+			await this.#exchange(serverId, "renewKeyAck", { ack: true }, write);
 		} catch { }
 	}
 
 	/**
 	 * Encrypt, send, await the response
-	 * If retryOnServerDecryptionFailure is true and the server reports DECRYPTION_FAILED,
-	 * reverts to the previous key and runs one additional exchange
+	 * On a server-reported DECRYPTION_FAILED, reverts to the previous key and retries once
 	 * Resolves with the decoded payload, rejects with {@link RelayError} on protocol errors
 	 *
 	 * @param {string} serverId
 	 * @param {string} type
 	 * @param {unknown} payload
 	 * @param {WriteFn} write
-	 * @param {boolean} retryOnServerDecryptionFailure
 	 * @returns {Promise<any>}
 	 */
-	async #exchange(serverId, type, payload, write, retryOnServerDecryptionFailure) {
+	async #exchange(serverId, type, payload, write) {
 		try {
 			return await this.#roundtrip(serverId, type, payload, write);
 		} catch (error) {
-			if (!retryOnServerDecryptionFailure) throw error;
 			if (!(error instanceof RelayError) || error.code !== ERR_DECRYPTION_FAILED) throw error;
 
 			// Retry with previous encryption if available
@@ -286,7 +282,7 @@ export class Client {
 		});
 
 		try {
-			write(envelope);
+			await write(envelope);
 		} catch (err) {
 			const entry = this.#pending.get(requestId);
 			if (entry) {
@@ -299,7 +295,7 @@ export class Client {
 	}
 
 	/**
-	 * Decrypt and decode a received envelope, trying the previous key if current fails
+	 * Decrypt and decode a received envelope, trying the previous key if current fails for in-flight responses that still use the previous one
 	 *
 	 * @param {{type: string, originId: string, targetId: string, requestId: string, payload: Uint8Array, error?: string}} env
 	 * @param {string} serverId
@@ -377,8 +373,8 @@ export class Client {
 	}
 
 	/**
-	 * Release all client state: reject pending requests, clear push handlers,
-	 * and drop cached sessions
+	 * Release all client state
+	 * Reject pending requests, clear push handlers, and drop cached sessions
 	 */
 	close() {
 		if (this.#closed) return;

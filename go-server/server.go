@@ -101,7 +101,7 @@ func (s *Server) ClearClient(clientID string) error {
 }
 
 // Receive is the entry point for every inbound envelope from the transport layer
-// Reserved types are handled internally; app requests are dispatched to the handler
+// Reserved types are handled internally, and app requests are dispatched to the handler
 // registered via OnRequest
 func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	if s.closed.Load() {
@@ -133,7 +133,7 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed))
 	}
 
-	// Reject replays: an authenticated ciphertext with a requestId we've already seen
+	// Reject replays (already seen requestId)
 	if env.RequestID != "" {
 		seen, err := s.replay.checkAndRecord(env.OriginID, env.RequestID)
 		if err != nil {

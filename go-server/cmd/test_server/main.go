@@ -8,7 +8,8 @@
 //	-private-key <hex>        server's 32-byte private key
 //	-client-id <string>       the single paired client's ID
 //	-client-pub <hex>         the client's 65-byte public key
-//	-drop-ack                 if set, the server suppresses renewKeyAckResult to simulate a lost ACK
+//	-drop-ack                 if set, the server drops the first renewKeyAck frame to simulate a lost ACK
+//	-drop-first-request       if set, the server drops the first non-renewal request frame to simulate a lost response
 //
 // Registered handlers (so the JS test can exercise them):
 //
@@ -42,12 +43,13 @@ import (
 
 func main() {
 	var (
-		socketPath  = flag.String("socket", "", "Unix socket path")
-		selfID      = flag.String("self-id", "", "server self ID")
-		privKeyHex  = flag.String("private-key", "", "server private key, hex-encoded (32 bytes)")
-		clientID    = flag.String("client-id", "", "paired client ID")
-		clientPub   = flag.String("client-pub", "", "client public key, hex-encoded (65 bytes)")
-		dropACKFlag = flag.Bool("drop-ack", false, "if set, the server suppresses the renewKeyAck response to simulate a lost ACK")
+		socketPath   = flag.String("socket", "", "Unix socket path")
+		selfID       = flag.String("self-id", "", "server self ID")
+		privKeyHex   = flag.String("private-key", "", "server private key, hex-encoded (32 bytes)")
+		clientID     = flag.String("client-id", "", "paired client ID")
+		clientPub    = flag.String("client-pub", "", "client public key, hex-encoded (65 bytes)")
+		dropACKFlag  = flag.Bool("drop-ack", false, "if set, the server drops the first renewKeyAck frame to simulate a lost ACK")
+		dropFirstReq = flag.Bool("drop-first-request", false, "if set, the server drops the first non-renewal request frame to simulate a lost response")
 	)
 	flag.Parse()
 
@@ -172,6 +174,8 @@ func main() {
 		return map[string]any{"ok": true}
 	})
 
+	// One-shot drop flags so each fires only once and later frames flow normally
+	ackDropped, firstReqDropped := false, false
 	for {
 		frame, err := readFrame(conn)
 		if err != nil {
@@ -180,12 +184,18 @@ func main() {
 			}
 			return
 		}
-		// Drop inbound renewKeyAck frames when the flag is set, so the server never commits
-		// the new client public key even though the client has already committed locally
-		if *dropACKFlag {
+		// Drop the first renewKeyAck so the server never commits the new key, or the first
+		// non-renewal request so the client never gets a response — both simulate lost frames
+		if *dropACKFlag && !ackDropped || *dropFirstReq && !firstReqDropped {
 			var shallow map[string]any
 			if err := cbor.Unmarshal(frame, &shallow); err == nil {
-				if t, _ := shallow["type"].(string); t == "renewKeyAck" {
+				t, _ := shallow["type"].(string)
+				if *dropACKFlag && !ackDropped && t == "renewKeyAck" {
+					ackDropped = true
+					continue
+				}
+				if *dropFirstReq && !firstReqDropped && t != "renewKey" && t != "renewKeyAck" {
+					firstReqDropped = true
 					continue
 				}
 			}

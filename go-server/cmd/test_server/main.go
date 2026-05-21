@@ -241,7 +241,7 @@ func pushWithKey(w io.Writer, selfID, clientID, msgType string, payload any, pri
 	if err != nil {
 		return err
 	}
-	aadHash := sha256.Sum256([]byte(msgType + "|" + selfID + "|" + clientID))
+	aadHash := sha256.Sum256([]byte(msgType + "|" + selfID + "|" + clientID + "|"))
 	aad := aadHash[:]
 	ciphertext, err := session.Encrypt(payloadCBOR, aad)
 	if err != nil {

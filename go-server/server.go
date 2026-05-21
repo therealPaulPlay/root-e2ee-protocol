@@ -127,7 +127,7 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errorCode))
 	}
 
-	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
+	aad := computeAAD(env.Type, env.OriginID, env.TargetID, env.RequestID)
 	plaintext, err := session.Decrypt(env.Payload, aad)
 	if err != nil {
 		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed))
@@ -245,7 +245,7 @@ func (s *Server) sessionFor(clientID string) (*Session, string) {
 // buildEncryptedResponse produces a response envelope carrying encrypted payload bytes
 // Pass nil payload for an empty-body success response
 func (s *Server) buildEncryptedResponse(clientID, msgType string, payload []byte, requestID string, session *Session) ([]byte, error) {
-	aad := computeAAD(msgType, s.selfID, clientID)
+	aad := computeAAD(msgType, s.selfID, clientID, requestID)
 	ciphertext, err := session.Encrypt(payload, aad)
 	if err != nil {
 		return nil, err

@@ -113,14 +113,15 @@ export async function deriveSession(privateKey, publicKey) {
 }
 
 /**
- * Compute AES-GCM AAD binding envelope metadata and return as SHA256(type|originId|targetId)
+ * Compute AES-GCM AAD binding envelope metadata and return as SHA256(type|originId|targetId|requestId)
  * @param {string} msgType
  * @param {string} originId
  * @param {string} targetId
+ * @param {string} requestId
  * @returns {Promise<Uint8Array>} 32 bytes
  */
-export async function computeAAD(msgType, originId, targetId) {
-	const data = new TextEncoder().encode(`${msgType}|${originId}|${targetId}`);
+export async function computeAAD(msgType, originId, targetId, requestId) {
+	const data = new TextEncoder().encode(`${msgType}|${originId}|${targetId}|${requestId}`);
 	const hash = await crypto.subtle.digest("SHA-256", data);
 	return new Uint8Array(hash);
 }

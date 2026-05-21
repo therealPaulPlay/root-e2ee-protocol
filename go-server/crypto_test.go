@@ -118,14 +118,18 @@ func TestSessionEmptyPlaintext(t *testing.T) {
 }
 
 func TestComputeAAD(t *testing.T) {
-	a := computeAAD("type", "from", "to")
-	b := computeAAD("type", "from", "to")
-	c := computeAAD("type", "from", "TO")
+	a := computeAAD("type", "from", "to", "req-1")
+	b := computeAAD("type", "from", "to", "req-1")
+	c := computeAAD("type", "from", "TO", "req-1")
+	d := computeAAD("type", "from", "to", "req-2")
 	if !bytes.Equal(a, b) {
 		t.Error("AAD should be deterministic for equal inputs")
 	}
 	if bytes.Equal(a, c) {
 		t.Error("AAD should differ when any component differs")
+	}
+	if bytes.Equal(a, d) {
+		t.Error("AAD should differ when requestId differs")
 	}
 	if len(a) != 32 {
 		t.Errorf("AAD should be 32 bytes (SHA256), got %d", len(a))

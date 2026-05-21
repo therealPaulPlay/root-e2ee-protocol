@@ -230,7 +230,7 @@ func TestRenewKeyAckClearsReplayHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal ack: %v", err)
 	}
-	aad := computeAAD("renewKeyAck", clientID, server.selfID)
+	aad := computeAAD("renewKeyAck", clientID, server.selfID, "req-id-1")
 	ciphertext, err := newSession.Encrypt(ackPayload, aad)
 	if err != nil {
 		t.Fatalf("encrypt ack: %v", err)
@@ -239,7 +239,7 @@ func TestRenewKeyAckClearsReplayHistory(t *testing.T) {
 		Type:      "renewKeyAck",
 		OriginID:  clientID,
 		TargetID:  server.selfID,
-		RequestID: "renew-1",
+		RequestID: "req-id-1",
 		Payload:   ciphertext,
 	}
 

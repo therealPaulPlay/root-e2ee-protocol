@@ -162,7 +162,7 @@ describe("Client push handlers", () => {
 
 		// Simulate a server push by building an envelope encrypted under the FIRST client's session
 		const firstServerSession = await deriveSession(serverKeypair.privateKey, firstClientKeypair.publicKey);
-		const aad1 = await computeAAD("tick", "s", "c");
+		const aad1 = await computeAAD("tick", "s", "c", "");
 		const cipher1 = await firstServerSession.encrypt(cbor.encode({ n: 1 }), aad1);
 		const env1 = cbor.encode({ type: "tick", originId: "s", targetId: "c", requestId: "", payload: cipher1 });
 
@@ -178,7 +178,7 @@ describe("Client push handlers", () => {
 
 		// Build a push encrypted under the SECOND client's session
 		const secondServerSession = await deriveSession(serverKeypair.privateKey, secondClientKeypair.publicKey);
-		const aad2 = await computeAAD("tick", "s", "c");
+		const aad2 = await computeAAD("tick", "s", "c", "");
 		const cipher2 = await secondServerSession.encrypt(cbor.encode({ n: 2 }), aad2);
 		const env2 = cbor.encode({ type: "tick", originId: "s", targetId: "c", requestId: "", payload: cipher2 });
 

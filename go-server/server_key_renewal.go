@@ -24,7 +24,7 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
-	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
+	aad := computeAAD(env.Type, env.OriginID, env.TargetID, env.RequestID)
 	plaintext, err := oldSession.Decrypt(env.Payload, aad)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed)
@@ -64,7 +64,7 @@ func (s *Server) handleRenewKeyAck(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
 	}
 
-	aad := computeAAD(env.Type, env.OriginID, env.TargetID)
+	aad := computeAAD(env.Type, env.OriginID, env.TargetID, env.RequestID)
 	plaintext, err := pending.session.Decrypt(env.Payload, aad)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errDecryptionFailed)

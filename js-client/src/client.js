@@ -264,7 +264,7 @@ export class Client {
 	async #roundtrip(serverId, type, payload, write) {
 		const requestId = crypto.randomUUID();
 		const session = await this.#sessionFor(serverId);
-		const aad = await computeAAD(type, this.#selfId, serverId);
+		const aad = await computeAAD(type, this.#selfId, serverId, requestId);
 		const envelope = cbor.encode({
 			type,
 			originId: this.#selfId,
@@ -307,7 +307,7 @@ export class Client {
 		// Incoming envelope includes protocol-level (unencrypted) error, surface it
 		if (error) return { payload: null, error };
 
-		const aad = await computeAAD(type, originId, env.targetId);
+		const aad = await computeAAD(type, originId, env.targetId, env.requestId);
 
 		const session = await this.#sessionFor(serverId).catch(() => null);
 		if (session) {

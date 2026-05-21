@@ -113,7 +113,7 @@ describe("Client push handlers", () => {
 	test("close is idempotent", () => {
 		const client = makeClient();
 		client.close();
-		client.close(); // should not throw
+		client.close(); // Should not throw
 	});
 
 	// An async write that rejects must surface as a request rejection, not an unhandled rejection

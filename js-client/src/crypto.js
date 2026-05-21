@@ -10,7 +10,7 @@ import { HKDF_INFO } from "./constants.js";
  * @property {Uint8Array} privateKey PKCS8 DER
  */
 
-/** AES-256-GCM session bound to a shared secret. Nonce is prepended to ciphertext on encrypt */
+/** AES-256-GCM session bound to a shared secret */
 export class Session {
 	#key;
 
@@ -29,7 +29,7 @@ export class Session {
 		/** @type {AesGcmParams} */
 		const params = { name: "AES-GCM", iv: nonce };
 		if (aad) params.additionalData = /** @type {BufferSource} */ (aad);
-		const ciphertext = await crypto.subtle.encrypt(params, this.#key, /** @type {BufferSource} */ (data));
+		const ciphertext = await crypto.subtle.encrypt(params, this.#key, /** @type {BufferSource} */(data));
 		const out = new Uint8Array(nonce.length + ciphertext.byteLength);
 		out.set(nonce);
 		out.set(new Uint8Array(ciphertext), nonce.length);
@@ -45,7 +45,7 @@ export class Session {
 		/** @type {AesGcmParams} */
 		const params = { name: "AES-GCM", iv: bytes.slice(0, 12) };
 		if (aad) params.additionalData = /** @type {BufferSource} */ (aad);
-		const plaintext = await crypto.subtle.decrypt(params, this.#key, /** @type {BufferSource} */ (bytes.slice(12)));
+		const plaintext = await crypto.subtle.decrypt(params, this.#key, /** @type {BufferSource} */(bytes.slice(12)));
 		return new Uint8Array(plaintext);
 	}
 }
@@ -74,14 +74,14 @@ export async function generateKeypair() {
 export async function deriveSession(privateKey, publicKey) {
 	const priv = await crypto.subtle.importKey(
 		"pkcs8",
-		/** @type {BufferSource} */ (privateKey),
+		/** @type {BufferSource} */(privateKey),
 		{ name: "ECDH", namedCurve: "P-256" },
 		false,
 		["deriveBits"]
 	);
 	const pub = await crypto.subtle.importKey(
 		"raw",
-		/** @type {BufferSource} */ (publicKey),
+		/** @type {BufferSource} */(publicKey),
 		{ name: "ECDH", namedCurve: "P-256" },
 		false,
 		[]
@@ -90,7 +90,7 @@ export async function deriveSession(privateKey, publicKey) {
 	const sharedBits = await crypto.subtle.deriveBits({ name: "ECDH", public: pub }, priv, 256);
 	const hkdfKey = await crypto.subtle.importKey(
 		"raw",
-		/** @type {BufferSource} */ (new Uint8Array(sharedBits)),
+		/** @type {BufferSource} */(new Uint8Array(sharedBits)),
 		"HKDF",
 		false,
 		["deriveKey"]

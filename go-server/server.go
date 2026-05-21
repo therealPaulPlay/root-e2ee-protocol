@@ -70,7 +70,7 @@ func NewServer(selfID string, keyStore KeyStore, replayStore ReplayStore) (*Serv
 }
 
 // OnRequest registers the handler for a client-request type
-// Only one handler per type; calling OnRequest twice for the same type replaces the prior handler
+// Only one handler per type, calling OnRequest twice for the same type replaces the prior handler
 func (s *Server) OnRequest(msgType string, handler RequestHandler) error {
 	if s.closed.Load() {
 		return fmt.Errorf("server closed")
@@ -181,7 +181,7 @@ func (s *Server) sendResponse(env envelope, payload any, session *Session, write
 }
 
 // Push encrypts and sends a message not triggered by an incoming request
-// RequestID on the wire is empty; clients distinguish pushes from replies by that
+// RequestID on the wire is empty and clients use that to distinguish pushes from replies
 func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) error {
 	if s.closed.Load() {
 		return fmt.Errorf("server closed")

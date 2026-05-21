@@ -47,7 +47,6 @@ const cbor = new Encoder(cborOptions);
 
 /**
  * Thrown when the server rejects a request at the protocol layer
- * code holds the protocol error code; message holds a concise human-readable description
  */
 export class RelayError extends Error {
 	/** @param {string} code */

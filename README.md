@@ -17,7 +17,7 @@ go get github.com/therealPaulPlay/root-e2ee-protocol/go-server
 - Key ownership: The server has one long-lived private key shared across all clients. Each client has one private key per server it talks to.
 - Key renewal: Only the client initiates renewal. The server is reactive.
 - Response expectations: Clients always get a response to a request, while servers can push messages without expecting anything back.
-- Ordering: Requests do not guarantee arrival order. If you fire multiple requests without awaiting, they run in parallel and resolve as their replies arrive (and not in the order you sent them). Use `await` before the next request if you need them handled in sequence. Push handlers fire whenever a push arrives and may interleave with requests. Do not assume a push has been handled just because a later request has resolved.
+- Ordering: Requests do not guarantee arrival order. Use `await` before the next request if strict ordering is needed. Push handlers fire whenever a push arrives and may interleave with requests, a push initiated before a request may arrive after its response.
 
 ## JS client
 
@@ -54,11 +54,11 @@ Parameter function types:
 
 ### Type: `KeyStore`
 
-The host implements this interface and passes an instance to the `Client` constructor. The library calls these methods to read and persist key material during requests and renewals. All private keys are PKCS8 DER bytes; all public keys are raw uncompressed SEC1 (65 bytes, leading `0x04`).
+The host implements this interface and passes an instance to the `Client` constructor. The library calls these methods to read and persist key material during requests and renewals. All private keys are PKCS8 DER bytes, all public keys are raw uncompressed SEC1.
 
 | Method | Parameters | Returns | Expected behavior |
 |---|---|---|---|
-| `getCurrent` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array, createdAt: number } \| null>` | Return the client's current private key for this server, the server's current public key, and the epoch ms the pair was installed. Return `null` if no key is stored. |
+| `getCurrent` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array, createdAt: number } \| null>` | Return the client's current private key for this server, the server's current public key, and the timestamp in ms where the pair was installed. Return `null` if no key is stored. |
 | `getPrevious` | `serverId: string` | `Promise<{ privateKey: Uint8Array, serverPublicKey: Uint8Array } \| null>` | Return the pair that was current immediately before the most recent renewal, or `null` if none is retained. |
 | `commitNewKey` | `serverId: string`, `newPrivateKey: Uint8Array` | `Promise<void>` | Atomically move the current pair into previous and install `newPrivateKey` as the new current, with `createdAt` set to now. |
 | `revertToPrevious` | `serverId: string` | `Promise<void>` | Swap previous into current and clear previous. Called when the server reports `DECRYPTION_FAILED`, indicating the two sides fell out of sync during a prior renewal. |
@@ -102,21 +102,21 @@ Methods:
 | `Close` | — | `error` | Stop the background key-cleanup goroutine. Call once during shutdown. |
 | `Receive` | `bytes []byte`, `write WriteFn` | `error` | Entry point for every inbound envelope. |
 | `Push` | `clientID, msgType string`, `payload any`, `write WriteFn` | `error` | Server-initiated push to a specific client. Payload is any CBOR-serializable value. |
-| `OnRequest` | `msgType string`, `handler RequestHandler` | — | Register the handler for a client-request type. Only one handler per type; calling this twice for the same type replaces the prior handler. |
+| `OnRequest` | `msgType string`, `handler RequestHandler` | — | Register the handler for a client-request type. Only one handler per type is allowed, registering twice replaces the prior handler. |
 | `OffRequest` | `msgType string` | — | Unregister the handler for a type. |
-| `ClearClient` | `clientID string` | `error` | Drop all per-client state (cached session and replay history). Call on unpair so a future re-pairing starts clean and memory is wiped. |
+| `ClearClient` | `clientID string` | `error` | Drop all per-client state (cached session and replay history). Call on unpair so a future re-pairing starts clean and memory is freed. |
 
 Parameter function types:
 
 | Type | Signature | Description |
 |---|---|---|
 | `WriteFn` | `func(bytes []byte) error` | Host-provided function that writes envelope bytes onto the connection. Called by the library from inside `Receive` and `Push`. |
-| `RequestHandler` | `func(clientID string, payload []byte, respond RespondFn) (responsePayload any)` | `payload` is the decrypted, still-CBOR-encoded request body. Return the response, or respond early using `respond(payload)` to allow for synchronous follow-up actions in the handler. |
+| `RequestHandler` | `func(clientID string, payload []byte, respond RespondFn) (responsePayload any)` | `payload` is the decrypted, still-CBOR-encoded request body. Return the response, or respond early using `respond(payload)` within the handler in case code needs to be executed after sending the response. |
 | `RespondFn` | `func(payload any) error` | Sends the response synchronously from inside the handler. |
 
 ### Struct: `KeyStore`
 
-The host populates this struct of function fields and passes it to `NewServer`. The library calls these functions to read and persist key material. All private keys are raw 32-byte scalars; all public keys are raw uncompressed SEC1 (65 bytes).
+The host populates this struct of function fields and passes it to `NewServer`. The library calls these functions to read and persist key material. All private keys are raw 32-byte scalars, all public keys are raw uncompressed SEC1 (65 bytes).
 
 | Field | Signature | Expected behavior |
 |---|---|---|
@@ -126,15 +126,13 @@ The host populates this struct of function fields and passes it to `NewServer`. 
 
 ### Struct: `ReplayStore`
 
-The host implements persistence for seen requestIDs. The library hands opaque bytes; the host writes them durably. A typical implementation uses an append-only file: `Append` writes one framed record with `O_APPEND + fsync`, `Save` atomically rewrites the file, `Load` returns the full file contents. A `Load` error fails `NewServer`; `Append` / `Save` errors propagate to the caller and the library rolls back its in-memory state so the on-disk and in-memory records stay consistent.
+The host implements persistence for seen requestIDs. The library hands opaque bytes and the host writes them durably.
 
 | Field | Signature | Expected behavior |
 |---|---|---|
 | `Load` | `func() ([]byte, error)` | Return everything the host has persisted, or `nil` on first boot. |
 | `Append` | `func(entry []byte) error` | Append a single framed record to durable storage. Any delay between accept and durable save is a replay window on crash. |
 | `Save` | `func(snapshot []byte) error` | Replace durable storage with the given snapshot. |
-
-Record framing includes a per-record CRC, so a crash during `Append` is detected at the next `Load` and the truncated tail is discarded.
 
 ### Struct: `Keypair`
 

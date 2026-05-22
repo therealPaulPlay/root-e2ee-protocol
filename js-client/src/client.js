@@ -218,10 +218,7 @@ export class Client {
 		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);
 
 		// Step 3: ACK encrypted with NEW session
-		// Non-fatal if the response is lost, client keeps the previous key stored and reverts to it on mismatch
-		try {
-			await this.#exchange(serverId, "renewKeyAck", { ack: true }, write);
-		} catch { }
+		await this.#exchange(serverId, "renewKeyAck", { ack: true }, write);
 	}
 
 	/**
@@ -302,13 +299,11 @@ export class Client {
 	 */
 	async #decodeEnvelope(env, serverId) {
 		const { type, originId, payload, error } = env;
-
-		// Incoming envelope includes protocol-level (unencrypted) error, surface it
-		if (error) return { payload: null, error };
+		if (error) return { payload: null, error }; // Incoming envelope includes protocol-level (unencrypted) error, surface it
 
 		const aad = await computeAAD(type, originId, env.targetId, env.requestId);
-
 		const session = await this.#sessionFor(serverId).catch(() => null);
+
 		if (session) {
 			try {
 				const plaintext = await session.decrypt(payload, aad);
@@ -319,7 +314,9 @@ export class Client {
 			} catch { }
 		}
 
+		// Decrypting with current session failed (or no session due to a consumer keystore implementation issue), try with previous
 		const prev = await this.#keyStore.getPrevious(serverId);
+
 		if (prev) {
 			try {
 				const prevSession = await deriveSession(prev.privateKey, prev.serverPublicKey);

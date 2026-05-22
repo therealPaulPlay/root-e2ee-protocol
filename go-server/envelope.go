@@ -8,8 +8,8 @@ type envelope struct {
 	OriginID  string `cbor:"originId"`
 	TargetID  string `cbor:"targetId"`
 	RequestID string `cbor:"requestId"`
-	Payload   []byte `cbor:"payload,omitempty"` // encrypted app content (nil on protocol errors)
-	Error     string `cbor:"error,omitempty"`   // library-owned error code
+	Payload   []byte `cbor:"payload,omitempty"` // Encrypted app content (nil on protocol errors)
+	Error     string `cbor:"error,omitempty"`   // Library-owned error code
 }
 
 func marshalEnvelope(m envelope) ([]byte, error) {

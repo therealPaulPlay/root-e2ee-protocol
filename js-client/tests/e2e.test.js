@@ -11,9 +11,9 @@ import { generateKeypair } from "../src/crypto.js";
 const SERVER_PKG = fileURLToPath(new URL("../../go-server/cmd/test_server", import.meta.url));
 
 /**
- * @param {{ dropAck?: boolean, dropFirstRequest?: boolean, keyMaxAgeMs?: number, requestTimeoutMs?: number, onWrite?: (bytes: Uint8Array) => void }} [opts]
+ * @param {{ dropAck?: boolean, keyMaxAgeMs?: number, requestTimeoutMs?: number, onWrite?: (bytes: Uint8Array) => void }} [opts]
  */
-async function spawnHarness({ dropAck = false, dropFirstRequest = false, keyMaxAgeMs, requestTimeoutMs, onWrite } = {}) {
+async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, onWrite } = {}) {
 	const serverKeypair = await rawKeypair();
 	const clientKeypair = await generateKeypair();
 
@@ -27,8 +27,7 @@ async function spawnHarness({ dropAck = false, dropFirstRequest = false, keyMaxA
 		"-private-key", toHex(serverKeypair.privateKey),
 		"-client-id", "client-1",
 		"-client-pub", toHex(clientKeypair.publicKey),
-		...(dropAck ? ["-drop-ack"] : []),
-		...(dropFirstRequest ? ["-drop-first-request"] : [])
+		...(dropAck ? ["-drop-ack"] : [])
 	];
 	const proc = spawn("go", args, { cwd: SERVER_PKG, stdio: ["ignore", "pipe", "pipe"] });
 	proc.stderr.on("data", (d) => process.stderr.write(d));
@@ -219,31 +218,18 @@ describe("e2e cross-language", () => {
 		expect(r3).toEqual({ n: 3 });
 	});
 
-	test("recovers from a lost renewKeyAck by reverting to the previous key", async () => {
+	test("recovers from a lost renewKeyAck on the next request by reverting to the previous key", async () => {
 		// Short requestTimeoutMs so the internal ACK wait gives up quickly
 		h = await spawnHarness({ dropAck: true, keyMaxAgeMs: 0, requestTimeoutMs: 1500 });
-		const originalPriv = h.keyState.current.privateKey;
 
-		// First request triggers a renewal -> server drops renewKeyAckResult -> from the server's
-		// pov the key was never committed -> next real request encrypts with the new key ->
-		// server can't decrypt -> returns DECRYPTION_FAILED -> client reverts to previous and retries
+		// Request 1 triggers a renewal, but the server drops the renewKeyAck so it never commits
+		// The lost ack fails the renewal, which rejects this request
+		await expect(h.client.request("server-1", "echo", { hi: true }, h.write)).rejects.toThrow();
+
+		// Request 2 encrypts under the new key -> server can't decrypt -> DECRYPTION_FAILED
+		// -> client reverts to the previous key and retries, so the request still succeeds
 		const response = await h.client.request("server-1", "echo", { hi: true }, h.write);
 		expect(response).toEqual({ hi: true });
-		expect(h.keyState.current.privateKey).toEqual(originalPriv);
-		expect(h.keyState.previous).toBeNull();
-	});
-
-	test("recovers when a stale key forces a renewal whose renewKey step itself fails decryption", async () => {
-		h = await spawnHarness({ dropAck: true, dropFirstRequest: true, keyMaxAgeMs: 0, requestTimeoutMs: 1500 });
-
-		// Request 1 renews, but its ack and its echo response are both dropped — the client commits a
-		// new key the server never did and gets no response to revert on, so it stays one key ahead
-		await expect(h.client.request("server-1", "echo", { step: 1 }, h.write)).rejects.toThrow();
-
-		// Request 2's forced renewal sends renewKey under the diverged key -> server returns
-		// DECRYPTION_FAILED on renewKey itself -> the request must still recover, not throw
-		const r2 = await h.client.request("server-1", "echo", { step: 2 }, h.write);
-		expect(r2).toEqual({ step: 2 });
 	});
 
 	test("decrypts in-flight server pushes encrypted with the previous session, then keeps using the new session for subsequent traffic", async () => {

@@ -1,25 +1,5 @@
 // test_server is a Unix-domain-socket helper used by the JS cross-language e2e tests
-// Framing: 4-byte big-endian length prefix + raw envelope bytes
-//
-// CLI flags:
-//
-//	-socket <path>            UDS path to listen on
-//	-self-id <string>         server's own ID
-//	-private-key <hex>        server's 32-byte private key
-//	-client-id <string>       the single paired client's ID
-//	-client-pub <hex>         the client's 65-byte public key
-//	-drop-ack                 if set, the server drops the first renewKeyAck frame to simulate a lost ACK
-//
-// Registered handlers (so the JS test can exercise them):
-//
-//	echo                  returns the incoming payload unchanged
-//	add                   expects {a, b} and returns {sum}
-//	trigger-push          sends a server Push of type "tick" carrying {n: 42}, then replies {ok: true}
-//	push-under-stashed    builds and writes a push envelope encrypted with the stashed pre-renewal
-//	                      session, bypassing the server's live session cache. The stash is taken
-//	                      automatically inside CommitClientPublicKey just before a key rotation,
-//	                      so this handler exercises the case where an in-flight push from before
-//	                      a renewal arrives after the client has already committed a new key
+// Framing on the socket is a 4-byte big-endian length prefix followed by raw envelope bytes
 package main
 
 import (
@@ -41,13 +21,14 @@ import (
 )
 
 func main() {
+	// Parse CLI flags
 	var (
 		socketPath  = flag.String("socket", "", "Unix socket path")
 		selfID      = flag.String("self-id", "", "server self ID")
 		privKeyHex  = flag.String("private-key", "", "server private key, hex-encoded (32 bytes)")
 		clientID    = flag.String("client-id", "", "paired client ID")
 		clientPub   = flag.String("client-pub", "", "client public key, hex-encoded (65 bytes)")
-		dropACKFlag = flag.Bool("drop-ack", false, "if set, the server drops the first renewKeyAck frame to simulate a lost ACK")
+		dropACKFlag = flag.Bool("drop-ack", false, "drop the first renewKeyAck frame to simulate a lost ACK")
 	)
 	flag.Parse()
 
@@ -55,6 +36,7 @@ func main() {
 		log.Fatal("missing required flags")
 	}
 
+	// Decode keys from hex
 	privKey, err := hex.DecodeString(*privKeyHex)
 	if err != nil {
 		log.Fatalf("decode private key: %v", err)
@@ -64,12 +46,13 @@ func main() {
 		log.Fatalf("decode client public key: %v", err)
 	}
 
-	// Client public key is mutable so the test can rotate it via renewKeyAck
+	// Mutable client public key so the test can rotate it via renewKeyAck
 	// stashedClientPub holds a snapshot taken before the most recent renewal (test-only)
 	var keyMu sync.Mutex
 	currentClientPub := clientPubKey
 	var stashedClientPub []byte
 
+	// Keystore implementation
 	keyStore := rp.KeyStore{
 		GetPrivateKey: func() ([]byte, error) { return privKey, nil },
 		GetClientPublicKey: func(id string) ([]byte, bool) {
@@ -83,14 +66,13 @@ func main() {
 		CommitClientPublicKey: func(id string, newPub []byte) error {
 			keyMu.Lock()
 			defer keyMu.Unlock()
-			// Stash the outgoing public key before replacing it (test-only)
-			stashedClientPub = append([]byte(nil), currentClientPub...)
+			stashedClientPub = append([]byte(nil), currentClientPub...) // Snapshot outgoing key for push-under-stashed
 			currentClientPub = append([]byte(nil), newPub...)
 			return nil
 		},
 	}
 
-	// Frames are processed sequentially, so the ReplayStore doesn't need its own lock
+	// Replay store implementation - frames are processed sequentially so no lock is needed
 	var replayBuf []byte
 	replayStore := rp.ReplayStore{
 		Load:   func() ([]byte, error) { return replayBuf, nil },
@@ -98,13 +80,14 @@ func main() {
 		Save:   func(snapshot []byte) error { replayBuf = snapshot; return nil },
 	}
 
+	// Create server instance
 	server, err := rp.NewServer(*selfID, keyStore, replayStore)
 	if err != nil {
 		log.Fatalf("new server: %v", err)
 	}
 	defer server.Close()
 
-	// Clean up any leftover socket
+	// Listen on the Unix socket (clean up any leftover socket file first)
 	_ = os.Remove(*socketPath)
 	listener, err := net.Listen("unix", *socketPath)
 	if err != nil {
@@ -115,7 +98,7 @@ func main() {
 	// Signal readiness so the JS test knows when to connect
 	fmt.Println("READY")
 
-	// Shutdown path on signal so the JS test can kill cleanly
+	// Shutdown on signal so the JS test can kill cleanly
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
@@ -123,6 +106,7 @@ func main() {
 		listener.Close()
 	}()
 
+	// Accept the single client connection
 	conn, err := listener.Accept()
 	if err != nil {
 		return
@@ -133,7 +117,7 @@ func main() {
 		return writeFrame(conn, bytes)
 	}
 
-	// Register handlers (writeFn is closed over for trigger-push)
+	// Handler: echo - returns the incoming payload unchanged
 	server.OnRequest("echo", func(_ string, payload []byte, _ rp.RespondFn) any {
 		var body any
 		if err := cbor.Unmarshal(payload, &body); err != nil {
@@ -141,6 +125,8 @@ func main() {
 		}
 		return body
 	})
+
+	// Handler: add - expects {a, b}, returns {sum}
 	server.OnRequest("add", func(_ string, payload []byte, _ rp.RespondFn) any {
 		var req struct {
 			A int64 `cbor:"a"`
@@ -151,14 +137,18 @@ func main() {
 		}
 		return map[string]any{"sum": req.A + req.B}
 	})
+
+	// Handler: trigger-push - sends a push, then the response afterwards
 	server.OnRequest("trigger-push", func(clientID string, _ []byte, _ rp.RespondFn) any {
-		// Send an unsolicited push to the client, then response normally
 		if err := server.Push(clientID, "tick", map[string]any{"n": 42}, writeFn); err != nil {
 			log.Printf("push failed: %v", err)
 			return map[string]any{"ok": false, "error": err.Error()}
 		}
 		return map[string]any{"ok": true}
 	})
+
+	// Handler: push-under-stashed - emits a push encrypted with the pre-renewal client key
+	// Exercises in-flight pushes that arrive after a renewal
 	server.OnRequest("push-under-stashed", func(clientID string, _ []byte, _ rp.RespondFn) any {
 		keyMu.Lock()
 		pub := append([]byte(nil), stashedClientPub...)
@@ -172,7 +162,7 @@ func main() {
 		return map[string]any{"ok": true}
 	})
 
-	// One-shot drop flag so it fires only once and later frames flow normally
+	// Main read loop, routes incoming frames to the server's receive
 	ackDropped := false
 	for {
 		frame, err := readFrame(conn)
@@ -182,7 +172,8 @@ func main() {
 			}
 			return
 		}
-		// Drop the first renewKeyAck so the server never commits the new key, simulating a lost frame
+
+		// If flag is set, simulate a lost renewKeyAck so the server never commits the new key
 		if *dropACKFlag && !ackDropped {
 			var shallow map[string]any
 			if err := cbor.Unmarshal(frame, &shallow); err == nil {
@@ -192,12 +183,15 @@ func main() {
 				}
 			}
 		}
+
 		if err := server.Receive(frame, writeFn); err != nil {
 			log.Printf("receive: %v", err)
 		}
 	}
 }
 
+// readFrame reads a length-prefixed frame
+// 4-byte big-endian length + payload
 func readFrame(r io.Reader) ([]byte, error) {
 	var lenBuf [4]byte
 	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
@@ -211,6 +205,8 @@ func readFrame(r io.Reader) ([]byte, error) {
 	return buf, nil
 }
 
+// writeFrame writes a length-prefixed frame
+// 4-byte big-endian length + payload
 func writeFrame(w io.Writer, payload []byte) error {
 	var lenBuf [4]byte
 	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(payload)))
@@ -222,8 +218,8 @@ func writeFrame(w io.Writer, payload []byte) error {
 }
 
 // pushWithKey hand-builds and writes a push envelope using the supplied key pair
-// Bypasses the server's session cache on purpose: the test uses this to deliver a push
-// encrypted under a session that has already been retired by a subsequent key renewal
+// Bypasses the server's session cache on purpose, a test uses this to deliver a push
+// encrypted under a session that has already been retired by a subsequent key renewal for checking the previous key fallback
 func pushWithKey(w io.Writer, selfID, clientID, msgType string, payload any, privKey, clientPub []byte) error {
 	session, err := rp.DeriveSession(privKey, clientPub)
 	if err != nil {
@@ -233,12 +229,15 @@ func pushWithKey(w io.Writer, selfID, clientID, msgType string, payload any, pri
 	if err != nil {
 		return err
 	}
+
+	// Bind the envelope metadata into AAD
 	aadHash := sha256.Sum256([]byte(msgType + "|" + selfID + "|" + clientID + "|"))
 	aad := aadHash[:]
 	ciphertext, err := session.Encrypt(payloadCBOR, aad)
 	if err != nil {
 		return err
 	}
+
 	envBytes, err := cbor.Marshal(map[string]any{
 		"type":      msgType,
 		"originId":  selfID,

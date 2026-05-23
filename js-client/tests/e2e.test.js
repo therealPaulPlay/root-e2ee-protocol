@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Client } from "../src/client.js";
 import { generateKeypair } from "../src/crypto.js";
 
-const SERVER_PKG = fileURLToPath(new URL("../../go-server/cmd/test_server", import.meta.url));
+const SERVER_PATH = fileURLToPath(new URL("../../go-server/cmd/test_server", import.meta.url));
 
 /**
  * @param {{ dropAck?: boolean, keyMaxAgeMs?: number, requestTimeoutMs?: number, onWrite?: (bytes: Uint8Array) => void }} [opts]
@@ -20,6 +20,7 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 	const socketDir = await mkdtemp(join(tmpdir(), "e2ee-"));
 	const socketPath = join(socketDir, "s.sock");
 
+	// Spawn test server process
 	const args = [
 		"run", ".",
 		"-socket", socketPath,
@@ -29,10 +30,13 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 		"-client-pub", toHex(clientKeypair.publicKey),
 		...(dropAck ? ["-drop-ack"] : [])
 	];
-	const proc = spawn("go", args, { cwd: SERVER_PKG, stdio: ["ignore", "pipe", "pipe"] });
+	const proc = spawn("go", args, { cwd: SERVER_PATH, stdio: ["ignore", "pipe", "pipe"] });
 	proc.stderr.on("data", (d) => process.stderr.write(d));
+
+	// Wait for test server to be ready
 	await waitForReady(proc);
 
+	// Connect to the test server
 	const sock = connect(socketPath);
 	await new Promise((resolve, reject) => {
 		sock.once("connect", resolve);
@@ -52,6 +56,8 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 		},
 		previous: null
 	};
+
+	// Mock keystore implementation
 	const keyStore = {
 		async getCurrent() { return keyState.current; },
 		async getPrevious() { return keyState.previous; },
@@ -65,17 +71,22 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 		},
 		async revertToPrevious() {
 			if (!keyState.previous) return;
-			keyState.current = { ...keyState.previous, createdAt: Date.now() };
+			keyState.current = { ...keyState.previous, createdAt: Date.now() }; // Previous key but with new creatdAt timestamp
 			keyState.previous = null;
 		}
 	};
 
+	// Mock write function
 	/** @param {Uint8Array} bytes */
 	const write = (bytes) => {
 		onWrite?.(bytes);
 		writeFrame(sock, bytes);
 	};
+
+	// Create client instance
 	const client = new Client({ selfId: "client-1", keyStore, keyMaxAgeMs, requestTimeoutMs });
+	
+	// Connect client to server outbound socket
 	readFrames(sock, (/** @type {Uint8Array} */ bytes) => client.receive(bytes));
 
 	return {
@@ -84,7 +95,7 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 		keyState,
 		async teardown() {
 			sock.destroy();
-			proc.kill("SIGTERM");
+			proc.kill("SIGTERM"); // Kill server process
 			await new Promise((resolve) => proc.once("exit", resolve));
 		}
 	};
@@ -102,16 +113,8 @@ async function rawKeypair() {
 	));
 	const publicKey = new Uint8Array(await crypto.subtle.exportKey("raw", pair.publicKey));
 	const jwk = await crypto.subtle.exportKey("jwk", pair.privateKey);
-	const privateKey = b64urlToBytes(/** @type {string} */ (jwk.d));
+	const privateKey = new Uint8Array(Buffer.from(/** @type {string} */(jwk.d), "base64url"));
 	return { publicKey, privateKey };
-}
-
-/** @param {string} s */
-function b64urlToBytes(s) {
-	const pad = s.length % 4 === 0 ? "" : "=".repeat(4 - (s.length % 4));
-	const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
-	const binary = atob(b64);
-	return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
 /**

@@ -1,8 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, test, expect } from "vitest";
 import { generateKeypair, deriveSession } from "../src/crypto.js";
 
 describe("generateKeypair", () => {
-	it("produces a raw uncompressed SEC1 public key (65 bytes, leading 0x04) and a PKCS8 private key", async () => {
+	test("produces a raw uncompressed SEC1 public key (65 bytes, leading 0x04) and a PKCS8 private key", async () => {
 		const { publicKey, privateKey } = await generateKeypair();
 		expect(publicKey).toBeInstanceOf(Uint8Array);
 		expect(privateKey).toBeInstanceOf(Uint8Array);
@@ -11,7 +11,7 @@ describe("generateKeypair", () => {
 		expect(privateKey.length).toBeGreaterThan(32); // PKCS8 DER is structured, always > raw
 	});
 
-	it("produces unique keypairs", async () => {
+	test("produces unique keypairs", async () => {
 		const a = await generateKeypair();
 		const b = await generateKeypair();
 		expect(a.publicKey).not.toEqual(b.publicKey);
@@ -20,7 +20,7 @@ describe("generateKeypair", () => {
 });
 
 describe("deriveSession", () => {
-	it("produces a symmetric session: alice(aPriv, bPub) can decrypt what bob(bPriv, aPub) encrypted", async () => {
+	test("produces a symmetric session: alice(aPriv, bPub) can decrypt what bob(bPriv, aPub) encrypted", async () => {
 		const a = await generateKeypair();
 		const b = await generateKeypair();
 		const alice = await deriveSession(a.privateKey, b.publicKey);
@@ -43,7 +43,7 @@ describe("Session", () => {
 		};
 	}
 
-	it("prepends a unique 12-byte nonce per encryption", async () => {
+	test("prepends a unique 12-byte nonce per encryption", async () => {
 		const { alice } = await makePair();
 		const data = new TextEncoder().encode("x");
 		const c1 = await alice.encrypt(data);
@@ -51,7 +51,7 @@ describe("Session", () => {
 		expect(c1.slice(0, 12)).not.toEqual(c2.slice(0, 12));
 	});
 
-	it("binds AAD: decryption fails when AAD differs from encryption", async () => {
+	test("binds AAD: decryption fails when AAD differs from encryption", async () => {
 		const { alice, bob } = await makePair();
 		const data = new TextEncoder().encode("x");
 		const aad = new Uint8Array([1, 2, 3]);
@@ -59,14 +59,14 @@ describe("Session", () => {
 		await expect(bob.decrypt(ciphertext, new Uint8Array([9, 9, 9]))).rejects.toThrow();
 	});
 
-	it("rejects tampered ciphertext", async () => {
+	test("rejects tampered ciphertext", async () => {
 		const { alice, bob } = await makePair();
 		const ciphertext = await alice.encrypt(new TextEncoder().encode("x"));
 		ciphertext[ciphertext.length - 1] ^= 1;
 		await expect(bob.decrypt(ciphertext)).rejects.toThrow();
 	});
 
-	it("handles empty plaintext", async () => {
+	test("handles empty plaintext", async () => {
 		const { alice, bob } = await makePair();
 		const ciphertext = await alice.encrypt(new Uint8Array(0));
 		expect(await bob.decrypt(ciphertext)).toEqual(new Uint8Array(0));

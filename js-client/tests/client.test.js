@@ -7,14 +7,16 @@ import { generateKeypair, deriveSession, computeAAD } from "../src/crypto.js";
 const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: true };
 const cbor = new Encoder(cborOptions);
 
+// Create client with mock (non-functional) keystore implementation
 function makeClient() {
 	return new Client({
 		selfId: "c",
 		keyStore: {
-			async getCurrent() { return null; },
-			async getPrevious() { return null; },
-			async commitNewKey() { },
-			async revertToPrevious() { }
+			async getServerPublicKey() { return null; },
+			async getCurrentPrivateKey() { return null; },
+			async getPreviousPrivateKey() { return null; },
+			async commitNewPrivateKey() { },
+			async revertToPreviousPrivateKey() { }
 		}
 	});
 }
@@ -123,12 +125,13 @@ describe("Client push handlers", () => {
 		const client = new Client({
 			selfId: "c",
 			keyStore: {
-				async getCurrent() {
-					return { privateKey: clientKeypair.privateKey, serverPublicKey: serverKeypair.publicKey, createdAt: Date.now() };
+				async getServerPublicKey() { return serverKeypair.publicKey; },
+				async getCurrentPrivateKey() {
+					return { privateKey: clientKeypair.privateKey, createdAt: Date.now() };
 				},
-				async getPrevious() { return null; },
-				async commitNewKey() { },
-				async revertToPrevious() { }
+				async getPreviousPrivateKey() { return null; },
+				async commitNewPrivateKey() { },
+				async revertToPreviousPrivateKey() { }
 			}
 		});
 		const write = async () => { throw new Error("transport down"); };
@@ -151,12 +154,13 @@ describe("Client push handlers", () => {
 		const client = new Client({
 			selfId: "c",
 			keyStore: {
-				async getCurrent() {
-					return { privateKey: state.privateKey, serverPublicKey: state.serverPublicKey, createdAt: Date.now() };
+				async getServerPublicKey() { return state.serverPublicKey; },
+				async getCurrentPrivateKey() {
+					return { privateKey: state.privateKey, createdAt: Date.now() };
 				},
-				async getPrevious() { return null; },
-				async commitNewKey() { },
-				async revertToPrevious() { }
+				async getPreviousPrivateKey() { return null; },
+				async commitNewPrivateKey() { },
+				async revertToPreviousPrivateKey() { }
 			}
 		});
 

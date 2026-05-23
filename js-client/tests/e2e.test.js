@@ -44,14 +44,14 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 	});
 
 	/**
-	 * @typedef {{ privateKey: Uint8Array, serverPublicKey: Uint8Array, createdAt: number }} CurrentKeys
-	 * @typedef {{ privateKey: Uint8Array, serverPublicKey: Uint8Array }} PreviousKeys
+	 * @typedef {{ privateKey: Uint8Array, createdAt: number }} CurrentKey
+	 * @typedef {{ privateKey: Uint8Array }} PreviousKey
 	 */
-	/** @type {{ current: CurrentKeys, previous: PreviousKeys | null }} */
+	/** @type {{ serverPublicKey: Uint8Array, current: CurrentKey, previous: PreviousKey | null }} */
 	const keyState = {
+		serverPublicKey: serverKeypair.publicKey,
 		current: {
 			privateKey: clientKeypair.privateKey,
-			serverPublicKey: serverKeypair.publicKey,
 			createdAt: Date.now()
 		},
 		previous: null
@@ -59,19 +59,20 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 
 	// Mock keystore implementation
 	const keyStore = {
-		async getCurrent() { return keyState.current; },
-		async getPrevious() { return keyState.previous; },
+		async getServerPublicKey() { return keyState.serverPublicKey; },
+		async getCurrentPrivateKey() { return keyState.current; },
+		async getPreviousPrivateKey() { return keyState.previous; },
 		/**
 		 * @param {string} _id
 		 * @param {Uint8Array} newPriv
 		 */
-		async commitNewKey(_id, newPriv) {
-			keyState.previous = { privateKey: keyState.current.privateKey, serverPublicKey: keyState.current.serverPublicKey };
-			keyState.current = { privateKey: newPriv, serverPublicKey: keyState.current.serverPublicKey, createdAt: Date.now() };
+		async commitNewPrivateKey(_id, newPriv) {
+			keyState.previous = { privateKey: keyState.current.privateKey };
+			keyState.current = { privateKey: newPriv, createdAt: Date.now() };
 		},
-		async revertToPrevious() {
+		async revertToPreviousPrivateKey() {
 			if (!keyState.previous) return;
-			keyState.current = { ...keyState.previous, createdAt: Date.now() }; // Previous key but with new creatdAt timestamp
+			keyState.current = { privateKey: keyState.previous.privateKey, createdAt: Date.now() }; // Previous key but with new createdAt timestamp
 			keyState.previous = null;
 		}
 	};

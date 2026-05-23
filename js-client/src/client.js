@@ -16,24 +16,23 @@ const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: tru
 const cbor = new Encoder(cborOptions);
 
 /**
- * @typedef {Object} CurrentKeyCombination
+ * @typedef {Object} CurrentPrivateKey
  * @property {Uint8Array} privateKey PKCS8 DER
- * @property {Uint8Array} serverPublicKey Raw uncompressed SEC1 (65 bytes)
  * @property {number} createdAt
  */
 
 /**
- * @typedef {Object} PreviousKeyCombination
+ * @typedef {Object} PreviousPrivateKey
  * @property {Uint8Array} privateKey PKCS8 DER
- * @property {Uint8Array} serverPublicKey Raw uncompressed SEC1 (65 bytes)
  */
 
 /**
  * @typedef {Object} KeyStore
- * @property {(serverId: string) => Promise<CurrentKeyCombination | null>} getCurrent
- * @property {(serverId: string) => Promise<PreviousKeyCombination | null>} getPrevious
- * @property {(serverId: string, newPrivateKey: Uint8Array) => Promise<void>} commitNewKey
- * @property {(serverId: string) => Promise<void>} revertToPrevious
+ * @property {(serverId: string) => Promise<Uint8Array | null>} getServerPublicKey
+ * @property {(serverId: string) => Promise<CurrentPrivateKey | null>} getCurrentPrivateKey
+ * @property {(serverId: string) => Promise<PreviousPrivateKey | null>} getPreviousPrivateKey
+ * @property {(serverId: string, newPrivateKey: Uint8Array) => Promise<void>} commitNewPrivateKey
+ * @property {(serverId: string) => Promise<void>} revertToPreviousPrivateKey
  */
 
 /** @typedef {(bytes: Uint8Array) => void | Promise<void>} WriteFn */
@@ -187,7 +186,7 @@ export class Client {
 	 * @param {WriteFn} write
 	 */
 	async #ensureKeyFresh(serverId, write) {
-		const current = await this.#keyStore.getCurrent(serverId);
+		const current = await this.#keyStore.getCurrentPrivateKey(serverId);
 		if (!current) return; // No key — request() will fail when deriving the session
 		if (Date.now() - current.createdAt < this.#keyMaxAgeMs) return; // Key still fresh
 
@@ -206,7 +205,7 @@ export class Client {
 	 * @param {WriteFn} write
 	 */
 	async #renewKey(serverId, write) {
-		const current = await this.#keyStore.getCurrent(serverId);
+		const current = await this.#keyStore.getCurrentPrivateKey(serverId);
 		if (!current) throw new Error(`No current key for server ${serverId}`);
 
 		const newKeypair = await generateKeypair();
@@ -215,7 +214,7 @@ export class Client {
 		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write);
 
 		// Step 2: current key becomes previous, new becomes current
-		await this.#keyStore.commitNewKey(serverId, newKeypair.privateKey);
+		await this.#keyStore.commitNewPrivateKey(serverId, newKeypair.privateKey);
 
 		// Step 3: ACK encrypted with NEW session
 		await this.#exchange(serverId, "renewKeyAck", { ack: true }, write);
@@ -239,10 +238,10 @@ export class Client {
 			if (!(error instanceof RelayError) || error.code !== ERR_DECRYPTION_FAILED) throw error;
 
 			// Retry with previous encryption if available
-			const prev = await this.#keyStore.getPrevious(serverId);
+			const prev = await this.#keyStore.getPreviousPrivateKey(serverId);
 			if (!prev) throw error;
 
-			await this.#keyStore.revertToPrevious(serverId);
+			await this.#keyStore.revertToPreviousPrivateKey(serverId);
 			return this.#roundtrip(serverId, type, payload, write);
 		}
 	}
@@ -304,6 +303,7 @@ export class Client {
 		const aad = await computeAAD(type, originId, env.targetId, env.requestId);
 		const session = await this.#sessionFor(serverId).catch(() => null);
 
+		// Try decrypting with the current session
 		if (session) {
 			try {
 				const plaintext = await session.decrypt(payload, aad);
@@ -314,12 +314,13 @@ export class Client {
 			} catch { }
 		}
 
-		// Decrypting with current session failed (or no session due to a consumer keystore implementation issue), try with previous
-		const prev = await this.#keyStore.getPrevious(serverId);
+		// Decrypting with current session failed (or no session due to a keystore impl issue or sessionFor threw), try with previous
+		const prev = await this.#keyStore.getPreviousPrivateKey(serverId);
+		const serverPublicKey = prev ? await this.#keyStore.getServerPublicKey(serverId) : null;
 
-		if (prev) {
+		if (prev && serverPublicKey) {
 			try {
-				const prevSession = await deriveSession(prev.privateKey, prev.serverPublicKey);
+				const prevSession = await deriveSession(prev.privateKey, serverPublicKey);
 				const plaintext = await prevSession.decrypt(payload, aad);
 				return {
 					payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
@@ -350,20 +351,22 @@ export class Client {
 	 * @returns {Promise<import("./crypto.js").Session>}
 	 */
 	async #sessionFor(serverId) {
-		const current = await this.#keyStore.getCurrent(serverId);
-		if (!current) throw new Error(`No current key for server ${serverId}`);
+		const current = await this.#keyStore.getCurrentPrivateKey(serverId);
+		if (!current) throw new Error(`No current private key for server ${serverId}`);
+		const serverPublicKey = await this.#keyStore.getServerPublicKey(serverId);
+		if (!serverPublicKey) throw new Error(`No server public key for server ${serverId}`);
 
 		// Reuse the cached session only if the key pair hasn't changed
 		const cached = this.#sessions.get(serverId);
-		if (cached && bytesEqual(cached.privateKey, current.privateKey) && bytesEqual(cached.serverPublicKey, current.serverPublicKey)) {
+		if (cached && bytesEqual(cached.privateKey, current.privateKey) && bytesEqual(cached.serverPublicKey, serverPublicKey)) {
 			return cached.session;
 		}
 
-		const session = await deriveSession(current.privateKey, current.serverPublicKey);
+		const session = await deriveSession(current.privateKey, serverPublicKey);
 		this.#sessions.set(serverId, {
 			session,
 			privateKey: current.privateKey,
-			serverPublicKey: current.serverPublicKey
+			serverPublicKey
 		});
 		return session;
 	}

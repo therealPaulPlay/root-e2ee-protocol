@@ -3,6 +3,7 @@ package rootproto
 import (
 	"encoding/binary"
 	"hash/crc32"
+	"log"
 	"sync"
 
 	"github.com/fxamacker/cbor/v2"
@@ -21,6 +22,10 @@ const (
 	kindSnapshot byte = 1
 	kindEntry    byte = 2
 )
+
+// Caps a single framed record's payload size on read
+// Also guards against an overflow-induced slice panic when the varint length would otherwise wrap past the bounds check
+const maxRecordPayload = 1 << 24 // 16 MB
 
 type replayTracker struct {
 	store ReplayStore
@@ -133,6 +138,10 @@ func parseReplayLog(data []byte) (map[string]map[string]struct{}, error) {
 
 		length, n := binary.Uvarint(rest)
 		if n <= 0 {
+			return sets, nil
+		}
+		if length > maxRecordPayload {
+			log.Printf("replay record length %d exceeds %d byte cap, dropping tail", length, maxRecordPayload)
 			return sets, nil
 		}
 		rest = rest[n:]

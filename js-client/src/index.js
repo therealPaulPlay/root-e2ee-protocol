@@ -1,2 +1,2 @@
 export { Client } from "./client.js";
-export { Session, generateKeypair, deriveSession } from "./crypto.js";
+export { Session, generateKeypairP256, deriveSessionP256 } from "./crypto.js";

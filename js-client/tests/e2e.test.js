@@ -5,8 +5,14 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { Encoder } from "cbor-x";
 import { Client } from "../src/client.js";
-import { generateKeypair } from "../src/crypto.js";
+import { generateKeypairP256 } from "../src/crypto.js";
+import { PROTOCOL_VERSION } from "../src/constants.js";
+
+/** @type {import("cbor-x").Options & { int64AsNumber?: boolean }} */
+const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: true };
+const cbor = new Encoder(cborOptions);
 
 const SERVER_PATH = fileURLToPath(new URL("../../go-server/cmd/test_server", import.meta.url));
 
@@ -15,7 +21,7 @@ const SERVER_PATH = fileURLToPath(new URL("../../go-server/cmd/test_server", imp
  */
 async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, onWrite } = {}) {
 	const serverKeypair = await rawKeypair();
-	const clientKeypair = await generateKeypair();
+	const clientKeypair = await generateKeypairP256();
 
 	const socketDir = await mkdtemp(join(tmpdir(), "e2ee-"));
 	const socketPath = join(socketDir, "s.sock");
@@ -86,7 +92,7 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 
 	// Create client instance
 	const client = new Client({ selfId: "client-1", keyStore, keyMaxAgeMs, requestTimeoutMs });
-	
+
 	// Connect client to server outbound socket
 	readFrames(sock, (/** @type {Uint8Array} */ bytes) => client.receive(bytes));
 
@@ -291,5 +297,37 @@ describe("e2e cross-language", () => {
 		harness.write(captured);
 
 		expect(await errorReceived).toBe("REPLAY");
+	});
+
+	test("the server rejects a request stamped with a version it does not implement", async () => {
+		const harness = await spawnHarness();
+		h = harness;
+
+		// Rewrite the version on the wire to one the server does not implement, the rejection
+		// must come back as UNSUPPORTED_VERSION on the pending request
+		const bumpVersion = (/** @type {Uint8Array} */ bytes) => {
+			const env = cbor.decode(bytes);
+			env.version = PROTOCOL_VERSION + 1;
+			harness.write(cbor.encode(env));
+		};
+
+		await expect(harness.client.request("server-1", "echo", { n: 1 }, bumpVersion))
+			.rejects.toMatchObject({ name: "RelayError", code: "UNSUPPORTED_VERSION" });
+	});
+
+	test("the client rejects a server push stamped with a version it does not implement", async () => {
+		h = await spawnHarness();
+
+		// The push arrives on the "tick" handler with the error arg set, payload undecoded
+		/** @type {(error: string) => void} */
+		let resolveError = () => { };
+		const errorReceived = new Promise((/** @type {(value: string) => void} */ resolve) => { resolveError = resolve; });
+		h.client.onPush("server-1", "tick", (_payload, error) => {
+			if (error) resolveError(error.code);
+		});
+
+		const response = await h.client.request("server-1", "trigger-bad-version-push", {}, h.write);
+		expect(response).toEqual({ ok: true });
+		expect(await errorReceived).toBe("UNSUPPORTED_VERSION");
 	});
 });

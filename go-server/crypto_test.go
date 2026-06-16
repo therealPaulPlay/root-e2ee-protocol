@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-func TestGenerateKeypair(t *testing.T) {
-	kp, err := GenerateKeypair()
+func TestGenerateKeypairP256(t *testing.T) {
+	kp, err := GenerateKeypairP256()
 	if err != nil {
-		t.Fatalf("GenerateKeypair error: %v", err)
+		t.Fatalf("GenerateKeypairP256 error: %v", err)
 	}
 	if len(kp.PublicKey) != 65 || kp.PublicKey[0] != 0x04 {
 		t.Errorf("public key must be 65-byte uncompressed SEC1 (leading 0x04), got %d bytes starting with %#x", len(kp.PublicKey), kp.PublicKey[0])
@@ -18,23 +18,23 @@ func TestGenerateKeypair(t *testing.T) {
 	}
 }
 
-func TestGenerateKeypairUnique(t *testing.T) {
-	a, _ := GenerateKeypair()
-	b, _ := GenerateKeypair()
+func TestGenerateKeypairP256Unique(t *testing.T) {
+	a, _ := GenerateKeypairP256()
+	b, _ := GenerateKeypairP256()
 	if bytes.Equal(a.PrivateKey, b.PrivateKey) || bytes.Equal(a.PublicKey, b.PublicKey) {
 		t.Error("two generated keypairs should be distinct")
 	}
 }
 
-func TestDeriveSharedSecretSymmetric(t *testing.T) {
-	alice, _ := GenerateKeypair()
-	bob, _ := GenerateKeypair()
+func TestDeriveSharedSecretP256Symmetric(t *testing.T) {
+	alice, _ := GenerateKeypairP256()
+	bob, _ := GenerateKeypairP256()
 
-	aliceSecret, err := deriveSharedSecret(alice.PrivateKey, bob.PublicKey)
+	aliceSecret, err := deriveSharedSecretP256(alice.PrivateKey, bob.PublicKey)
 	if err != nil {
 		t.Fatalf("alice derive: %v", err)
 	}
-	bobSecret, err := deriveSharedSecret(bob.PrivateKey, alice.PublicKey)
+	bobSecret, err := deriveSharedSecretP256(bob.PrivateKey, alice.PublicKey)
 	if err != nil {
 		t.Fatalf("bob derive: %v", err)
 	}
@@ -47,9 +47,9 @@ func TestDeriveSharedSecretSymmetric(t *testing.T) {
 }
 
 func TestSessionRoundtrip(t *testing.T) {
-	a, _ := GenerateKeypair()
-	b, _ := GenerateKeypair()
-	secret, _ := deriveSharedSecret(a.PrivateKey, b.PublicKey)
+	a, _ := GenerateKeypairP256()
+	b, _ := GenerateKeypairP256()
+	secret, _ := deriveSharedSecretP256(a.PrivateKey, b.PublicKey)
 	session, err := SessionFromKey(secret)
 	if err != nil {
 		t.Fatalf("SessionFromKey: %v", err)
@@ -73,7 +73,7 @@ func TestSessionRoundtrip(t *testing.T) {
 }
 
 func TestSessionUniqueNonces(t *testing.T) {
-	secret, _ := deriveSharedSecret(must(GenerateKeypair()).PrivateKey, must(GenerateKeypair()).PublicKey)
+	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
 	session, _ := SessionFromKey(secret)
 	c1, _ := session.Encrypt([]byte("x"), nil)
 	c2, _ := session.Encrypt([]byte("x"), nil)
@@ -83,7 +83,7 @@ func TestSessionUniqueNonces(t *testing.T) {
 }
 
 func TestSessionAADBinding(t *testing.T) {
-	secret, _ := deriveSharedSecret(must(GenerateKeypair()).PrivateKey, must(GenerateKeypair()).PublicKey)
+	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
 	session, _ := SessionFromKey(secret)
 	ciphertext, _ := session.Encrypt([]byte("x"), []byte("aad-a"))
 	if _, err := session.Decrypt(ciphertext, []byte("aad-b")); err == nil {
@@ -92,7 +92,7 @@ func TestSessionAADBinding(t *testing.T) {
 }
 
 func TestSessionTamperedCiphertext(t *testing.T) {
-	secret, _ := deriveSharedSecret(must(GenerateKeypair()).PrivateKey, must(GenerateKeypair()).PublicKey)
+	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
 	session, _ := SessionFromKey(secret)
 	ciphertext, _ := session.Encrypt([]byte("x"), nil)
 	ciphertext[len(ciphertext)-1] ^= 1
@@ -102,7 +102,7 @@ func TestSessionTamperedCiphertext(t *testing.T) {
 }
 
 func TestSessionEmptyPlaintext(t *testing.T) {
-	secret, _ := deriveSharedSecret(must(GenerateKeypair()).PrivateKey, must(GenerateKeypair()).PublicKey)
+	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
 	session, _ := SessionFromKey(secret)
 	ciphertext, err := session.Encrypt(nil, nil)
 	if err != nil {

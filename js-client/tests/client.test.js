@@ -1,7 +1,8 @@
 import { describe, test, expect } from "vitest";
 import { Encoder } from "cbor-x";
 import { Client } from "../src/client.js";
-import { generateKeypair, deriveSession, computeAAD } from "../src/crypto.js";
+import { generateKeypairP256, deriveSessionP256, computeAAD } from "../src/crypto.js";
+import { PROTOCOL_VERSION } from "../src/constants.js";
 
 /** @type {import("cbor-x").Options & { int64AsNumber?: boolean }} */
 const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: true };
@@ -24,6 +25,7 @@ function makeClient() {
 // A server-emitted plaintext-error envelope is delivered to onPush handlers as the error arg
 function errorEnvelope() {
 	return cbor.encode({
+		version: PROTOCOL_VERSION,
 		type: "tick",
 		originId: "s",
 		targetId: "c",
@@ -120,8 +122,8 @@ describe("Client push handlers", () => {
 
 	// An async write that rejects must surface as a request rejection, not an unhandled rejection
 	test("a rejecting async write surfaces as a request rejection", async () => {
-		const serverKeypair = await generateKeypair();
-		const clientKeypair = await generateKeypair();
+		const serverKeypair = await generateKeypairP256();
+		const clientKeypair = await generateKeypairP256();
 		const client = new Client({
 			selfId: "c",
 			keyStore: {
@@ -142,9 +144,9 @@ describe("Client push handlers", () => {
 	// Re-pairing can swap the stored keys without the library's knowledge; next request
 	// must re-derive the session from the new keys instead of using the cached stale one
 	test("session re-derives when KeyStore keys change out-from-under it", async () => {
-		const serverKeypair = await generateKeypair();
-		const firstClientKeypair = await generateKeypair();
-		const secondClientKeypair = await generateKeypair();
+		const serverKeypair = await generateKeypairP256();
+		const firstClientKeypair = await generateKeypairP256();
+		const secondClientKeypair = await generateKeypairP256();
 
 		// Mutable keystore simulating a re-pair flow
 		const state = {
@@ -165,10 +167,10 @@ describe("Client push handlers", () => {
 		});
 
 		// Simulate a server push by building an envelope encrypted under the FIRST client's session
-		const firstServerSession = await deriveSession(serverKeypair.privateKey, firstClientKeypair.publicKey);
+		const firstServerSession = await deriveSessionP256(serverKeypair.privateKey, firstClientKeypair.publicKey);
 		const aad1 = await computeAAD("tick", "s", "c", "");
 		const cipher1 = await firstServerSession.encrypt(cbor.encode({ n: 1 }), aad1);
-		const env1 = cbor.encode({ type: "tick", originId: "s", targetId: "c", requestId: "", payload: cipher1 });
+		const env1 = cbor.encode({ version: PROTOCOL_VERSION, type: "tick", originId: "s", targetId: "c", requestId: "", payload: cipher1 });
 
 		/** @type {any[]} */
 		const received = [];
@@ -181,10 +183,10 @@ describe("Client push handlers", () => {
 		state.privateKey = secondClientKeypair.privateKey;
 
 		// Build a push encrypted under the SECOND client's session
-		const secondServerSession = await deriveSession(serverKeypair.privateKey, secondClientKeypair.publicKey);
+		const secondServerSession = await deriveSessionP256(serverKeypair.privateKey, secondClientKeypair.publicKey);
 		const aad2 = await computeAAD("tick", "s", "c", "");
 		const cipher2 = await secondServerSession.encrypt(cbor.encode({ n: 2 }), aad2);
-		const env2 = cbor.encode({ type: "tick", originId: "s", targetId: "c", requestId: "", payload: cipher2 });
+		const env2 = cbor.encode({ version: PROTOCOL_VERSION, type: "tick", originId: "s", targetId: "c", requestId: "", payload: cipher2 });
 
 		await client.receive(env2);
 		expect(received).toEqual([{ n: 1 }, { n: 2 }]);

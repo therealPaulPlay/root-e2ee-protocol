@@ -156,7 +156,18 @@ func main() {
 		if len(pub) == 0 {
 			return map[string]any{"ok": false, "error": "no stashed session"}
 		}
-		if err := pushWithKey(conn, *selfID, clientID, "stale-tick", map[string]any{"stale": true}, privKey, pub); err != nil {
+		if err := pushWithKey(conn, 1, *selfID, clientID, "stale-tick", map[string]any{"stale": true}, privKey, pub); err != nil {
+			return map[string]any{"ok": false, "error": err.Error()}
+		}
+		return map[string]any{"ok": true}
+	})
+
+	// Handler: trigger-bad-version-push - pushes an envelope stamped with version 99, which no real release uses
+	server.OnRequest("trigger-bad-version-push", func(clientID string, _ []byte, _ rp.RespondFn) any {
+		keyMu.Lock()
+		pub := append([]byte(nil), currentClientPub...)
+		keyMu.Unlock()
+		if err := pushWithKey(conn, 99, *selfID, clientID, "tick", map[string]any{"n": 42}, privKey, pub); err != nil {
 			return map[string]any{"ok": false, "error": err.Error()}
 		}
 		return map[string]any{"ok": true}
@@ -217,11 +228,10 @@ func writeFrame(w io.Writer, payload []byte) error {
 	return err
 }
 
-// pushWithKey hand-builds and writes a push envelope using the supplied key pair
-// Bypasses the server's session cache on purpose, a test uses this to deliver a push
-// encrypted under a session that has already been retired by a subsequent key renewal for checking the previous key fallback
-func pushWithKey(w io.Writer, selfID, clientID, msgType string, payload any, privKey, clientPub []byte) error {
-	session, err := rp.DeriveSession(privKey, clientPub)
+// pushWithKey hand-builds and writes a push envelope using the supplied key pair and wire version
+// Bypasses the server's session cache on purpose, used by tests for previous-key and version mismatch cases
+func pushWithKey(w io.Writer, version uint64, selfID, clientID, msgType string, payload any, privKey, clientPub []byte) error {
+	session, err := rp.DeriveSessionP256(privKey, clientPub)
 	if err != nil {
 		return err
 	}
@@ -239,6 +249,7 @@ func pushWithKey(w io.Writer, selfID, clientID, msgType string, payload any, pri
 	}
 
 	envBytes, err := cbor.Marshal(map[string]any{
+		"version":   version,
 		"type":      msgType,
 		"originId":  selfID,
 		"targetId":  clientID,

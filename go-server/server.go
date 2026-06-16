@@ -114,6 +114,9 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 	if env.TargetID != s.selfID {
 		return fmt.Errorf("envelope targetId does not match selfID")
 	}
+	if env.Version != protocolVersion {
+		return write(s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errUnsupportedVersion))
+	}
 
 	switch env.Type {
 	case msgRenewKey:
@@ -226,7 +229,7 @@ func (s *Server) sessionFor(clientID string) (*Session, string) {
 		return cached.session, ""
 	}
 
-	secret, err := deriveSharedSecret(priv, clientPub)
+	secret, err := deriveSharedSecretP256(priv, clientPub)
 	if err != nil {
 		return nil, errInvalidKey
 	}
@@ -251,6 +254,7 @@ func (s *Server) buildEncryptedResponse(clientID, msgType string, payload []byte
 		return nil, err
 	}
 	return marshalEnvelope(envelope{
+		Version:   protocolVersion,
 		Type:      msgType,
 		OriginID:  s.selfID,
 		TargetID:  clientID,
@@ -262,6 +266,7 @@ func (s *Server) buildEncryptedResponse(clientID, msgType string, payload []byte
 // buildProtocolError produces a plaintext envelope carrying a library-owned error code
 func (s *Server) buildProtocolError(clientID, requestID, requestType, code string) []byte {
 	out, _ := marshalEnvelope(envelope{
+		Version:   protocolVersion,
 		Type:      requestType,
 		OriginID:  s.selfID,
 		TargetID:  clientID,

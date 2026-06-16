@@ -1,12 +1,14 @@
 import { Encoder } from "cbor-x";
-import { deriveSession, computeAAD, generateKeypair } from "./crypto.js";
+import { deriveSessionP256, computeAAD, generateKeypairP256 } from "./crypto.js";
 import { bytesEqual } from "./utils.js";
 import {
 	RESERVED_TYPES,
 	ERR_DECRYPTION_FAILED,
+	ERR_UNSUPPORTED_VERSION,
 	ERROR_MESSAGES,
 	DEFAULT_REQUEST_TIMEOUT_MS,
-	DEFAULT_KEY_MAX_AGE_MS
+	DEFAULT_KEY_MAX_AGE_MS,
+	PROTOCOL_VERSION
 } from "./constants.js";
 
 // int64AsNumber avoids BigInt values that break Date() and other JS APIs
@@ -158,7 +160,11 @@ export class Client {
 			throw new Error("Malformed envelope", { cause });
 		}
 		if (env.targetId !== this.#selfId) throw new Error("Envelope targetId does not match selfId");
-		const result = await this.#decodeEnvelope(env, env.originId);
+
+		// Reject on version mismatch
+		const result = env.version !== PROTOCOL_VERSION
+			? { payload: null, error: ERR_UNSUPPORTED_VERSION }
+			: await this.#decodeEnvelope(env, env.originId);
 
 		const pendingRequestId = env.requestId;
 		if (pendingRequestId && this.#pending.has(pendingRequestId)) {
@@ -208,7 +214,7 @@ export class Client {
 		const current = await this.#keyStore.getCurrentPrivateKey(serverId);
 		if (!current) throw new Error(`No current key for server ${serverId}`);
 
-		const newKeypair = await generateKeypair();
+		const newKeypair = await generateKeypairP256();
 
 		// Step 1: renewKey encrypted with OLD session
 		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write);
@@ -261,6 +267,7 @@ export class Client {
 		const session = await this.#sessionFor(serverId);
 		const aad = await computeAAD(type, this.#selfId, serverId, requestId);
 		const envelope = cbor.encode({
+			version: PROTOCOL_VERSION,
 			type,
 			originId: this.#selfId,
 			targetId: serverId,
@@ -271,7 +278,7 @@ export class Client {
 		const responsePromise = new Promise((resolve, reject) => {
 			const timeout = setTimeout(() => {
 				this.#pending.delete(requestId);
-				reject(new Error(`Request ${type} timed out after ${this.#requestTimeoutMs}ms`));
+				reject(new Error(`Request ${type} timed out after ${this.#requestTimeoutMs / 1000}s`));
 			}, this.#requestTimeoutMs);
 			this.#pending.set(requestId, { resolve, reject, timeout });
 		});
@@ -320,7 +327,7 @@ export class Client {
 
 		if (prev && serverPublicKey) {
 			try {
-				const prevSession = await deriveSession(prev.privateKey, serverPublicKey);
+				const prevSession = await deriveSessionP256(prev.privateKey, serverPublicKey);
 				const plaintext = await prevSession.decrypt(payload, aad);
 				return {
 					payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
@@ -362,7 +369,7 @@ export class Client {
 			return cached.session;
 		}
 
-		const session = await deriveSession(current.privateKey, serverPublicKey);
+		const session = await deriveSessionP256(current.privateKey, serverPublicKey);
 		this.#sessions.set(serverId, {
 			session,
 			privateKey: current.privateKey,

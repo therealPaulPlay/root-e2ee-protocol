@@ -15,7 +15,7 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}
 
-	oldSecret, err := deriveSharedSecret(priv, clientPub)
+	oldSecret, err := deriveSharedSecretP256(priv, clientPub)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}
@@ -37,7 +37,7 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidPayload)
 	}
 
-	newSecret, err := deriveSharedSecret(priv, req.NewPublicKey)
+	newSecret, err := deriveSharedSecretP256(priv, req.NewPublicKey)
 	if err != nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}

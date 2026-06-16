@@ -1,5 +1,8 @@
 export const RESERVED_TYPES = ["renewKey", "renewKeyAck"];
 export const ERR_DECRYPTION_FAILED = "DECRYPTION_FAILED";
+export const ERR_UNSUPPORTED_VERSION = "UNSUPPORTED_VERSION";
+
+export const PROTOCOL_VERSION = 1;
 
 export const HKDF_INFO = "root-privacy-encryption";
 
@@ -15,5 +18,6 @@ export const ERROR_MESSAGES = {
 	INVALID_PAYLOAD: "Server rejected the payload as malformed",
 	INTERNAL_ERROR: "Server encountered an internal error",
 	UNKNOWN_TYPE: "Server does not recognize the request type",
-	REPLAY: "Server rejected the request as a replay"
+	REPLAY: "Server rejected the request as a replay",
+	UNSUPPORTED_VERSION: "Server does not support the protocol version"
 };

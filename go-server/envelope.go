@@ -4,6 +4,7 @@ import "github.com/fxamacker/cbor/v2"
 
 // envelope is the internal CBOR wire format
 type envelope struct {
+	Version   uint64 `cbor:"version"` // Wire format version
 	Type      string `cbor:"type"`
 	OriginID  string `cbor:"originId"`
 	TargetID  string `cbor:"targetId"`

@@ -66,7 +66,7 @@ The host implements this interface and passes an instance to the `Client` constr
 
 ### Class: `Session`
 
-Returned by `deriveSession`. Provides AES-256-GCM encryption for use cases outside the request/response flow.
+Returned by `deriveSessionP256`. Provides AES-256-GCM encryption for use cases outside the request/response flow.
 
 | Method | Parameters | Returns | Description |
 |---|---|---|---|
@@ -77,8 +77,8 @@ Returned by `deriveSession`. Provides AES-256-GCM encryption for use cases outsi
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `generateKeypair` | — | `Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>` | Generate a fresh P-256 keypair. `publicKey` is raw uncompressed SEC1 (65 bytes). `privateKey` is PKCS8 DER. |
-| `deriveSession` | `privateKey: Uint8Array`, `publicKey: Uint8Array` | `Promise<Session>` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. `privateKey` is PKCS8 DER, `publicKey` is raw uncompressed SEC1. |
+| `generateKeypairP256` | — | `Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>` | Generate a fresh P-256 keypair. `publicKey` is raw uncompressed SEC1 (65 bytes). `privateKey` is PKCS8 DER. |
+| `deriveSessionP256` | `privateKey: Uint8Array`, `publicKey: Uint8Array` | `Promise<Session>` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. `privateKey` is PKCS8 DER, `publicKey` is raw uncompressed SEC1. |
 
 ## Go server
 
@@ -137,7 +137,7 @@ The host implements persistence for seen requestIDs. The library hands opaque by
 
 ### Struct: `Keypair`
 
-Returned by `GenerateKeypair`.
+Returned by `GenerateKeypairP256`.
 
 | Field | Type | Description |
 |---|---|---|
@@ -157,8 +157,8 @@ Provides AES-256-GCM encryption for use cases outside the request/response flow.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `GenerateKeypair` | — | `(*Keypair, error)` | Generate a fresh P-256 keypair (raw bytes). |
-| `DeriveSession` | `privateKey, publicKey []byte` | `(*Session, error)` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. |
+| `GenerateKeypairP256` | — | `(*Keypair, error)` | Generate a fresh P-256 keypair (raw bytes). |
+| `DeriveSessionP256` | `privateKey, publicKey []byte` | `(*Session, error)` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. |
 | `SessionFromKey` | `key []byte` | `(*Session, error)` | Construct an AES-GCM session from a 32-byte key. |
 
 ## Tests

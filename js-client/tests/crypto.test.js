@@ -1,9 +1,9 @@
 import { describe, test, expect } from "vitest";
-import { generateKeypair, deriveSession } from "../src/crypto.js";
+import { generateKeypairP256, deriveSessionP256 } from "../src/crypto.js";
 
-describe("generateKeypair", () => {
+describe("generateKeypairP256", () => {
 	test("produces a raw uncompressed SEC1 public key (65 bytes, leading 0x04) and a PKCS8 private key", async () => {
-		const { publicKey, privateKey } = await generateKeypair();
+		const { publicKey, privateKey } = await generateKeypairP256();
 		expect(publicKey).toBeInstanceOf(Uint8Array);
 		expect(privateKey).toBeInstanceOf(Uint8Array);
 		expect(publicKey.length).toBe(65);
@@ -12,19 +12,19 @@ describe("generateKeypair", () => {
 	});
 
 	test("produces unique keypairs", async () => {
-		const a = await generateKeypair();
-		const b = await generateKeypair();
+		const a = await generateKeypairP256();
+		const b = await generateKeypairP256();
 		expect(a.publicKey).not.toEqual(b.publicKey);
 		expect(a.privateKey).not.toEqual(b.privateKey);
 	});
 });
 
-describe("deriveSession", () => {
+describe("deriveSessionP256", () => {
 	test("produces a symmetric session: alice(aPriv, bPub) can decrypt what bob(bPriv, aPub) encrypted", async () => {
-		const a = await generateKeypair();
-		const b = await generateKeypair();
-		const alice = await deriveSession(a.privateKey, b.publicKey);
-		const bob = await deriveSession(b.privateKey, a.publicKey);
+		const a = await generateKeypairP256();
+		const b = await generateKeypairP256();
+		const alice = await deriveSessionP256(a.privateKey, b.publicKey);
+		const bob = await deriveSessionP256(b.privateKey, a.publicKey);
 
 		const plaintext = new TextEncoder().encode("hello");
 		const ciphertext = await bob.encrypt(plaintext);
@@ -35,11 +35,11 @@ describe("deriveSession", () => {
 
 describe("Session", () => {
 	async function makePair() {
-		const a = await generateKeypair();
-		const b = await generateKeypair();
+		const a = await generateKeypairP256();
+		const b = await generateKeypairP256();
 		return {
-			alice: await deriveSession(a.privateKey, b.publicKey),
-			bob: await deriveSession(b.privateKey, a.publicKey)
+			alice: await deriveSessionP256(a.privateKey, b.publicKey),
+			bob: await deriveSessionP256(b.privateKey, a.publicKey)
 		};
 	}
 

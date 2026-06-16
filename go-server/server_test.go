@@ -90,17 +90,17 @@ func TestOnRequestReplacesPriorHandler(t *testing.T) {
 // Re-pairing can swap the stored client public key without going through renewKey; the next
 // sessionFor call must re-derive rather than return the stale cached session
 func TestSessionFromKeyChangesWhenStoredKeyChanges(t *testing.T) {
-	serverKeypair, err := GenerateKeypair()
+	serverKeypair, err := GenerateKeypairP256()
 	if err != nil {
-		t.Fatalf("GenerateKeypair (server): %v", err)
+		t.Fatalf("GenerateKeypairP256 (server): %v", err)
 	}
-	firstClient, err := GenerateKeypair()
+	firstClient, err := GenerateKeypairP256()
 	if err != nil {
-		t.Fatalf("GenerateKeypair (first client): %v", err)
+		t.Fatalf("GenerateKeypairP256 (first client): %v", err)
 	}
-	secondClient, err := GenerateKeypair()
+	secondClient, err := GenerateKeypairP256()
 	if err != nil {
-		t.Fatalf("GenerateKeypair (second client): %v", err)
+		t.Fatalf("GenerateKeypairP256 (second client): %v", err)
 	}
 
 	// Mutable store simulating a re-pair flow that swaps the client's public key
@@ -133,9 +133,9 @@ func TestSessionFromKeyChangesWhenStoredKeyChanges(t *testing.T) {
 
 	// Verify the second session actually pairs with the new keys: a message encrypted under
 	// the new shared secret should decrypt successfully
-	expectedSecret, err := deriveSharedSecret(serverKeypair.PrivateKey, secondClient.PublicKey)
+	expectedSecret, err := deriveSharedSecretP256(serverKeypair.PrivateKey, secondClient.PublicKey)
 	if err != nil {
-		t.Fatalf("deriveSharedSecret: %v", err)
+		t.Fatalf("deriveSharedSecretP256: %v", err)
 	}
 	expectedSession, err := SessionFromKey(expectedSecret)
 	if err != nil {
@@ -194,9 +194,9 @@ func TestReplayTrackerDeleteClient(t *testing.T) {
 // Key rotation clears the client's replay history as part of handleRenewKeyAck
 func TestRenewKeyAckClearsReplayHistory(t *testing.T) {
 	// Real P-256 keys so the renewKeyAck ECDH + AEAD path can run
-	serverKeypair, err := GenerateKeypair()
+	serverKeypair, err := GenerateKeypairP256()
 	if err != nil {
-		t.Fatalf("GenerateKeypair: %v", err)
+		t.Fatalf("GenerateKeypairP256: %v", err)
 	}
 	committed := make(map[string][]byte)
 	server, err := NewServer("server", KeyStore{
@@ -215,13 +215,13 @@ func TestRenewKeyAckClearsReplayHistory(t *testing.T) {
 	server.replay.checkAndRecord(clientID, "seeded-id")
 
 	// Buffer a pending new session as if handleRenewKey had run
-	newClientKeypair, err := GenerateKeypair()
+	newClientKeypair, err := GenerateKeypairP256()
 	if err != nil {
-		t.Fatalf("GenerateKeypair: %v", err)
+		t.Fatalf("GenerateKeypairP256: %v", err)
 	}
-	newSession, err := DeriveSession(serverKeypair.PrivateKey, newClientKeypair.PublicKey)
+	newSession, err := DeriveSessionP256(serverKeypair.PrivateKey, newClientKeypair.PublicKey)
 	if err != nil {
-		t.Fatalf("DeriveSession: %v", err)
+		t.Fatalf("DeriveSessionP256: %v", err)
 	}
 	server.keys.bufferPending(clientID, newClientKeypair.PublicKey, newSession)
 

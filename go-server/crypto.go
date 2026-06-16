@@ -30,8 +30,8 @@ type Keypair struct {
 	PrivateKey []byte
 }
 
-// GenerateKeypair creates a new P-256 keypair
-func GenerateKeypair() (*Keypair, error) {
+// GenerateKeypairP256 creates a new P-256 keypair
+func GenerateKeypairP256() (*Keypair, error) {
 	priv, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
 		return nil, err
@@ -42,19 +42,19 @@ func GenerateKeypair() (*Keypair, error) {
 	}, nil
 }
 
-// DeriveSession performs P-256 ECDH between your private key and the other side's public key,
+// DeriveSessionP256 performs P-256 ECDH between your private key and the other side's public key,
 // runs HKDF-SHA256 over the result, and returns an AES-GCM session bound to the derived key
-func DeriveSession(privateKey, publicKey []byte) (*Session, error) {
-	secret, err := deriveSharedSecret(privateKey, publicKey)
+func DeriveSessionP256(privateKey, publicKey []byte) (*Session, error) {
+	secret, err := deriveSharedSecretP256(privateKey, publicKey)
 	if err != nil {
 		return nil, err
 	}
 	return SessionFromKey(secret)
 }
 
-// deriveSharedSecret performs P-256 ECDH between your private key and the other side's
+// deriveSharedSecretP256 performs P-256 ECDH between your private key and the other side's
 // public key, then runs HKDF-SHA256 over the result to produce a 32-byte AES key
-func deriveSharedSecret(privateKey, publicKey []byte) ([]byte, error) {
+func deriveSharedSecretP256(privateKey, publicKey []byte) ([]byte, error) {
 	curve := ecdh.P256()
 
 	priv, err := curve.NewPrivateKey(privateKey)

@@ -54,7 +54,7 @@ export class Session {
  * Generate a fresh P-256 keypair
  * @returns {Promise<Keypair>}
  */
-export async function generateKeypair() {
+export async function generateKeypairP256() {
 	const pair = /** @type {CryptoKeyPair} */ (await crypto.subtle.generateKey(
 		{ name: "ECDH", namedCurve: "P-256" },
 		true,
@@ -71,7 +71,7 @@ export async function generateKeypair() {
  * @param {Uint8Array} publicKey Raw uncompressed SEC1 (65 bytes)
  * @returns {Promise<Session>}
  */
-export async function deriveSession(privateKey, publicKey) {
+export async function deriveSessionP256(privateKey, publicKey) {
 	const priv = await crypto.subtle.importKey(
 		"pkcs8",
 		/** @type {BufferSource} */(privateKey),

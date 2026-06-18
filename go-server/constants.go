@@ -22,4 +22,5 @@ const (
 	errUnknownType        = "UNKNOWN_TYPE"
 	errReplay             = "REPLAY"
 	errUnsupportedVersion = "UNSUPPORTED_VERSION"
+	errUnsupportedKeyType = "UNSUPPORTED_KEY_TYPE"
 )

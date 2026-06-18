@@ -1,5 +1,5 @@
 import { Encoder } from "cbor-x";
-import { deriveSessionP256, computeAAD, generateKeypairP256 } from "./crypto.js";
+import { deriveSession, computeAAD, generateKeypairP256 } from "./crypto.js";
 import { bytesEqual } from "./utils.js";
 import {
 	RESERVED_TYPES,
@@ -12,28 +12,33 @@ import {
 } from "./constants.js";
 
 // int64AsNumber avoids BigInt values that break Date() and other JS APIs
-// Cast: the option exists at runtime but is missing from cbor-x's type definitions
+// The option exists at runtime but is missing from cbor-x's type definitions, hence we need to cast
 /** @type {import("cbor-x").Options & { int64AsNumber?: boolean }} */
 const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: true };
 const cbor = new Encoder(cborOptions);
 
 /**
- * @typedef {Object} CurrentPrivateKey
- * @property {Uint8Array} privateKey PKCS8 DER
- * @property {number} createdAt
+ * @typedef {Object} PrivateKey
+ * @property {Uint8Array} privateKey
+ * @property {string} keyType
  */
 
 /**
- * @typedef {Object} PreviousPrivateKey
- * @property {Uint8Array} privateKey PKCS8 DER
+ * @typedef {PrivateKey & { createdAt: number }} TimestampedPrivateKey
+ */
+
+/**
+ * @typedef {Object} PublicKey
+ * @property {Uint8Array} publicKey
+ * @property {string} keyType
  */
 
 /**
  * @typedef {Object} KeyStore
- * @property {(serverId: string) => Promise<Uint8Array | null>} getServerPublicKey
- * @property {(serverId: string) => Promise<CurrentPrivateKey | null>} getCurrentPrivateKey
- * @property {(serverId: string) => Promise<PreviousPrivateKey | null>} getPreviousPrivateKey
- * @property {(serverId: string, newPrivateKey: Uint8Array) => Promise<void>} commitNewPrivateKey
+ * @property {(serverId: string) => Promise<PublicKey | null>} getServerPublicKey
+ * @property {(serverId: string) => Promise<TimestampedPrivateKey | null>} getCurrentPrivateKey
+ * @property {(serverId: string) => Promise<PrivateKey | null>} getPreviousPrivateKey
+ * @property {(serverId: string, newKey: PrivateKey) => Promise<void>} commitNewPrivateKey
  * @property {(serverId: string) => Promise<void>} revertToPreviousPrivateKey
  */
 
@@ -85,9 +90,8 @@ export class Client {
 	}
 
 	/**
-	 * Register a handler for server-initiated pushes of the given type, scoped to one server
-	 * Multiple handlers per (serverId, type) fire in registration order
-	 * The handler receives (payload, error): on protocol errors, payload is null and error is a RelayError
+	 * Register a handler for server-initiated pushes of the given type, scoped to one server (multiple are allowed)
+	 * The handler receives (payload, error), on protocol errors, payload is null and error is a RelayError
 	 *
 	 * @param {string} serverId
 	 * @param {string} type
@@ -219,8 +223,8 @@ export class Client {
 		// Step 1: renewKey encrypted with OLD session
 		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write);
 
-		// Step 2: current key becomes previous, new becomes current
-		await this.#keyStore.commitNewPrivateKey(serverId, newKeypair.privateKey);
+		// Step 2: current key becomes previous, new becomes current, keyType mustn't change
+		await this.#keyStore.commitNewPrivateKey(serverId, { privateKey: newKeypair.privateKey, keyType: current.keyType });
 
 		// Step 3: ACK encrypted with NEW session
 		await this.#exchange(serverId, "renewKeyAck", { ack: true }, write);
@@ -308,33 +312,26 @@ export class Client {
 		if (error) return { payload: null, error }; // Incoming envelope includes protocol-level (unencrypted) error, surface it
 
 		const aad = await computeAAD(type, originId, env.targetId, env.requestId);
-		const session = await this.#sessionFor(serverId).catch(() => null);
 
-		// Try decrypting with the current session
-		if (session) {
-			try {
-				const plaintext = await session.decrypt(payload, aad);
-				return {
-					payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
-					error: null
-				};
-			} catch { }
-		}
+		// Try the current key
+		try {
+			const session = await this.#sessionFor(serverId);
+			const plaintext = await session.decrypt(payload, aad);
+			return {
+				payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
+				error: null
+			};
+		} catch { }
 
-		// Decrypting with current session failed (or no session due to a keystore impl issue or sessionFor threw), try with previous
-		const prev = await this.#keyStore.getPreviousPrivateKey(serverId);
-		const serverPublicKey = prev ? await this.#keyStore.getServerPublicKey(serverId) : null;
-
-		if (prev && serverPublicKey) {
-			try {
-				const prevSession = await deriveSessionP256(prev.privateKey, serverPublicKey);
-				const plaintext = await prevSession.decrypt(payload, aad);
-				return {
-					payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
-					error: null
-				};
-			} catch { }
-		}
+		// Current session failed, try the previous key
+		try {
+			const session = await this.#sessionFor(serverId, { usePrevious: true });
+			const plaintext = await session.decrypt(payload, aad);
+			return {
+				payload: plaintext.length > 0 ? cbor.decode(plaintext) : null,
+				error: null
+			};
+		} catch { }
 
 		return { payload: null, error: ERR_DECRYPTION_FAILED };
 	}
@@ -354,27 +351,43 @@ export class Client {
 	}
 
 	/**
+	 * Derive the session from a client's private key and the server's public key
+	 * With usePrevious, derives from the previous key (for in-flight responses) and bypasses the cache
+	 *
 	 * @param {string} serverId
-	 * @returns {Promise<import("./crypto.js").Session>}
+	 * @param {{ usePrevious?: boolean }} [opts]
+	 * @returns {Promise<import("./crypto.js").SessionAES256GCM>}
 	 */
-	async #sessionFor(serverId) {
-		const current = await this.#keyStore.getCurrentPrivateKey(serverId);
-		if (!current) throw new Error(`No current private key for server ${serverId}`);
+	async #sessionFor(serverId, { usePrevious = false } = {}) {
+		const privateKey = usePrevious
+			? await this.#keyStore.getPreviousPrivateKey(serverId)
+			: await this.#keyStore.getCurrentPrivateKey(serverId);
+		if (!privateKey) throw new Error(`No private key for server ${serverId}`);
 		const serverPublicKey = await this.#keyStore.getServerPublicKey(serverId);
 		if (!serverPublicKey) throw new Error(`No server public key for server ${serverId}`);
+		if (serverPublicKey.keyType !== privateKey.keyType) throw new Error(`Server key type ${serverPublicKey.keyType} does not match client key type ${privateKey.keyType}`);
 
-		// Reuse the cached session only if the key pair hasn't changed
-		const cached = this.#sessions.get(serverId);
-		if (cached && bytesEqual(cached.privateKey, current.privateKey) && bytesEqual(cached.serverPublicKey, serverPublicKey)) {
-			return cached.session;
+		if (!usePrevious) {
+			// Reuse the cached session only if the key pair (bytes and type) hasn't changed
+			const cached = this.#sessions.get(serverId);
+			if (cached
+				&& cached.privateKey.keyType === privateKey.keyType && bytesEqual(cached.privateKey.privateKey, privateKey.privateKey)
+				&& cached.serverPublicKey.keyType === serverPublicKey.keyType && bytesEqual(cached.serverPublicKey.publicKey, serverPublicKey.publicKey)) {
+				return cached.session;
+			}
 		}
 
-		const session = await deriveSessionP256(current.privateKey, serverPublicKey);
-		this.#sessions.set(serverId, {
-			session,
-			privateKey: current.privateKey,
-			serverPublicKey
-		});
+		const session = await deriveSession(privateKey.keyType, privateKey.privateKey, serverPublicKey.publicKey);
+
+		// Do not cache the previous session
+		if (!usePrevious) {
+			this.#sessions.set(serverId, {
+				session,
+				privateKey,
+				serverPublicKey
+			});
+		}
+
 		return session;
 	}
 

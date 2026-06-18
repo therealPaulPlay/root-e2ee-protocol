@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { Encoder } from "cbor-x";
 import { Client } from "../src/client.js";
 import { generateKeypairP256 } from "../src/crypto.js";
-import { PROTOCOL_VERSION } from "../src/constants.js";
+import { PROTOCOL_VERSION, KEY_TYPE_P256 } from "../src/constants.js";
 
 /** @type {import("cbor-x").Options & { int64AsNumber?: boolean }} */
 const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: true };
@@ -50,35 +50,36 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 	});
 
 	/**
-	 * @typedef {{ privateKey: Uint8Array, createdAt: number }} CurrentKey
-	 * @typedef {{ privateKey: Uint8Array }} PreviousKey
+	 * @typedef {{ privateKey: Uint8Array, createdAt: number, keyType: string }} CurrentKey
+	 * @typedef {{ privateKey: Uint8Array, keyType: string }} PreviousKey
 	 */
 	/** @type {{ serverPublicKey: Uint8Array, current: CurrentKey, previous: PreviousKey | null }} */
 	const keyState = {
 		serverPublicKey: serverKeypair.publicKey,
 		current: {
 			privateKey: clientKeypair.privateKey,
-			createdAt: Date.now()
+			createdAt: Date.now(),
+			keyType: KEY_TYPE_P256
 		},
 		previous: null
 	};
 
 	// Mock keystore implementation
 	const keyStore = {
-		async getServerPublicKey() { return keyState.serverPublicKey; },
+		async getServerPublicKey() { return { publicKey: keyState.serverPublicKey, keyType: KEY_TYPE_P256 }; },
 		async getCurrentPrivateKey() { return keyState.current; },
 		async getPreviousPrivateKey() { return keyState.previous; },
 		/**
 		 * @param {string} _id
-		 * @param {Uint8Array} newPriv
+		 * @param {{ privateKey: Uint8Array, keyType: string }} newKey
 		 */
-		async commitNewPrivateKey(_id, newPriv) {
-			keyState.previous = { privateKey: keyState.current.privateKey };
-			keyState.current = { privateKey: newPriv, createdAt: Date.now() };
+		async commitNewPrivateKey(_id, newKey) {
+			keyState.previous = { privateKey: keyState.current.privateKey, keyType: keyState.current.keyType };
+			keyState.current = { privateKey: newKey.privateKey, createdAt: Date.now(), keyType: newKey.keyType };
 		},
 		async revertToPreviousPrivateKey() {
 			if (!keyState.previous) return;
-			keyState.current = { privateKey: keyState.previous.privateKey, createdAt: Date.now() }; // Previous key but with new createdAt timestamp
+			keyState.current = { privateKey: keyState.previous.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 }; // Previous key but with new createdAt timestamp
 			keyState.previous = null;
 		}
 	};

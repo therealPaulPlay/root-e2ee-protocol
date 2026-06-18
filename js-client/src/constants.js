@@ -1,10 +1,13 @@
 export const RESERVED_TYPES = ["renewKey", "renewKeyAck"];
 export const ERR_DECRYPTION_FAILED = "DECRYPTION_FAILED";
 export const ERR_UNSUPPORTED_VERSION = "UNSUPPORTED_VERSION";
+export const ERR_UNSUPPORTED_KEY_TYPE = "UNSUPPORTED_KEY_TYPE";
 
 export const PROTOCOL_VERSION = 1;
 
 export const HKDF_INFO = "root-privacy-encryption";
+
+export const KEY_TYPE_P256 = "p256";
 
 export const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 export const DEFAULT_KEY_MAX_AGE_MS = 5 * 60_000;
@@ -19,5 +22,6 @@ export const ERROR_MESSAGES = {
 	INTERNAL_ERROR: "Server encountered an internal error",
 	UNKNOWN_TYPE: "Server does not recognize the request type",
 	REPLAY: "Server rejected the request as a replay",
-	UNSUPPORTED_VERSION: "Server does not support the protocol version"
+	UNSUPPORTED_VERSION: "Server does not support the protocol version",
+	UNSUPPORTED_KEY_TYPE: "Server does not support the key type"
 };

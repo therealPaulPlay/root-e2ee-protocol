@@ -10,12 +10,22 @@ import (
 	"github.com/fxamacker/cbor/v2"
 )
 
+type PrivateKey struct {
+	Key     []byte // The raw private key bytes
+	KeyType string
+}
+
+type PublicKey struct {
+	Key     []byte // The raw public key bytes
+	KeyType string
+}
+
 // KeyStore is the server's callback seam into host-owned persistence
-// The server holds one long-lived private key shared across all clients
+// The server holds a single long-lived private key per key type, shared across all clients
 type KeyStore struct {
-	GetPrivateKey         func() ([]byte, error)                           // raw 32-byte scalar
-	GetClientPublicKey    func(clientID string) ([]byte, bool)             // raw uncompressed SEC1, (nil,false) if unknown
-	CommitClientPublicKey func(clientID string, newPublicKey []byte) error // persist after validated renewKeyAck
+	GetPrivateKey         func(keyType string) *PrivateKey                     // Long-lived private key of the given type, nil if the server has none
+	GetClientPublicKey    func(clientID string) *PublicKey                     // Current public key and its type, nil if unknown
+	CommitClientPublicKey func(clientID string, newPublicKey *PublicKey) error // Persist after validated renewKeyAck
 }
 
 // WriteFn is the host-owned wire
@@ -47,9 +57,9 @@ type Server struct {
 // cachedSession pairs a derived session with the key material that produced it
 // so sessionFor can detect and prune on key changes
 type cachedSession struct {
-	session         *Session
-	privateKey      []byte
-	clientPublicKey []byte
+	session         *SessionAES256GCM
+	privateKey      *PrivateKey
+	clientPublicKey *PublicKey
 }
 
 // NewServer constructs a server
@@ -171,7 +181,7 @@ func (s *Server) Receive(bytes []byte, write WriteFn) error {
 }
 
 // sendResponse CBOR-encodes the payload, encrypts it under the given session, and writes the envelope
-func (s *Server) sendResponse(env envelope, payload any, session *Session, write WriteFn) error {
+func (s *Server) sendResponse(env envelope, payload any, session *SessionAES256GCM, write WriteFn) error {
 	payloadBytes, err := cbor.Marshal(payload)
 	if err != nil {
 		return fmt.Errorf("marshal response payload: %w", err)
@@ -211,43 +221,43 @@ func (s *Server) Push(clientID, msgType string, payload any, write WriteFn) erro
 
 // sessionFor returns the cached session for a client, deriving a fresh one when the
 // cached entry's keys no longer match the KeyStore
-func (s *Server) sessionFor(clientID string) (*Session, string) {
+func (s *Server) sessionFor(clientID string) (*SessionAES256GCM, string) {
 	s.sessionMu.Lock()
 	defer s.sessionMu.Unlock()
 
-	clientPub, ok := s.keyStore.GetClientPublicKey(clientID)
-	if !ok {
+	clientPublicKey := s.keyStore.GetClientPublicKey(clientID)
+	if clientPublicKey == nil {
 		return nil, errNoClientKey
 	}
-	priv, err := s.keyStore.GetPrivateKey()
-	if err != nil {
+	// Get server private key of the right type
+	privateKey := s.keyStore.GetPrivateKey(clientPublicKey.KeyType)
+	if privateKey == nil {
 		return nil, errInvalidKey
 	}
 
-	// Reuse the cached session only if the key pair hasn't changed
-	if cached, ok := s.sessions[clientID]; ok && bytes.Equal(cached.privateKey, priv) && bytes.Equal(cached.clientPublicKey, clientPub) {
+	// Reuse the cached session only if the key pair (bytes and type) hasn't changed
+	if cached, ok := s.sessions[clientID]; ok &&
+		cached.privateKey.KeyType == privateKey.KeyType && bytes.Equal(cached.privateKey.Key, privateKey.Key) &&
+		cached.clientPublicKey.KeyType == clientPublicKey.KeyType && bytes.Equal(cached.clientPublicKey.Key, clientPublicKey.Key) {
 		return cached.session, ""
 	}
 
-	secret, err := deriveSharedSecretP256(priv, clientPub)
-	if err != nil {
-		return nil, errInvalidKey
-	}
-	session, err := SessionFromKey(secret)
-	if err != nil {
-		return nil, errInternalError
+	// Derive session based on key type
+	session, errCode := deriveSession(privateKey.KeyType, privateKey.Key, clientPublicKey.Key)
+	if errCode != "" {
+		return nil, errCode
 	}
 	s.sessions[clientID] = &cachedSession{
 		session:         session,
-		privateKey:      append([]byte(nil), priv...),
-		clientPublicKey: append([]byte(nil), clientPub...),
+		privateKey:      privateKey,
+		clientPublicKey: clientPublicKey,
 	}
 	return session, ""
 }
 
 // buildEncryptedResponse produces a response envelope carrying encrypted payload bytes
 // Pass nil payload for an empty-body success response
-func (s *Server) buildEncryptedResponse(clientID, msgType string, payload []byte, requestID string, session *Session) ([]byte, error) {
+func (s *Server) buildEncryptedResponse(clientID, msgType string, payload []byte, requestID string, session *SessionAES256GCM) ([]byte, error) {
 	aad := computeAAD(msgType, s.selfID, clientID, requestID)
 	ciphertext, err := session.Encrypt(payload, aad)
 	if err != nil {

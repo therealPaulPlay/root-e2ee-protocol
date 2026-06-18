@@ -54,20 +54,27 @@ func main() {
 
 	// Keystore implementation
 	keyStore := rp.KeyStore{
-		GetPrivateKey: func() ([]byte, error) { return privKey, nil },
-		GetClientPublicKey: func(id string) ([]byte, bool) {
+		GetPrivateKey: func(keyType string) *rp.PrivateKey {
+			switch keyType {
+			case rp.KeyTypeP256:
+				return &rp.PrivateKey{Key: privKey, KeyType: rp.KeyTypeP256}
+			default:
+				return nil
+			}
+		},
+		GetClientPublicKey: func(id string) *rp.PublicKey {
 			if id != *clientID {
-				return nil, false
+				return nil
 			}
 			keyMu.Lock()
 			defer keyMu.Unlock()
-			return append([]byte(nil), currentClientPub...), true
+			return &rp.PublicKey{Key: append([]byte(nil), currentClientPub...), KeyType: rp.KeyTypeP256}
 		},
-		CommitClientPublicKey: func(id string, newPub []byte) error {
+		CommitClientPublicKey: func(id string, newPub *rp.PublicKey) error {
 			keyMu.Lock()
 			defer keyMu.Unlock()
 			stashedClientPub = append([]byte(nil), currentClientPub...) // Snapshot outgoing key for push-under-stashed
-			currentClientPub = append([]byte(nil), newPub...)
+			currentClientPub = append([]byte(nil), newPub.Key...)
 			return nil
 		},
 	}

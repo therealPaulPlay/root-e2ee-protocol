@@ -33,7 +33,7 @@ describe("deriveSessionP256", () => {
 	});
 });
 
-describe("Session", () => {
+describe("SessionAES256GCM", () => {
 	async function makePair() {
 		const a = await generateKeypairP256();
 		const b = await generateKeypairP256();

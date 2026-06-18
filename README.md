@@ -14,7 +14,7 @@ go get github.com/therealPaulPlay/root-e2ee-protocol/go-server
 
 ## Model
 
-- Key ownership: The server has one long-lived private key shared across all clients. Each client has one private key per server it talks to.
+- Key ownership: The server has one long-lived private key per key type, shared across all clients. Each client has one private key per server it talks to.
 - Key renewal: Only the client initiates renewal. The server is reactive.
 - Response expectations: Clients always get a response to a request, while servers can push messages without expecting anything back.
 - Ordering: Requests do not guarantee arrival order. Use `await` before the next request if strict ordering is needed. Push handlers fire whenever a push arrives and may interleave with requests, a push initiated before a request may arrive after its response.
@@ -54,17 +54,17 @@ Parameter function types:
 
 ### Type: `KeyStore`
 
-The host implements this interface and passes an instance to the `Client` constructor. The library calls these methods to read and persist key material during requests and renewals. All private keys are PKCS8 DER bytes, all public keys are raw uncompressed SEC1.
+The host implements this interface and passes an instance to the `Client` constructor. The library calls these methods to read and persist key material during requests and renewals.
 
 | Method | Parameters | Returns | Expected behavior |
 |---|---|---|---|
-| `getServerPublicKey` | `serverId: string` | `Promise<Uint8Array \| null>` | Return the server's public key (raw uncompressed SEC1, 65 bytes), or `null` if no key is stored. |
-| `getCurrentPrivateKey` | `serverId: string` | `Promise<{ privateKey: Uint8Array, createdAt: number } \| null>` | Return the client's current private key for this server and the timestamp in ms where it was installed. Return `null` if no key is stored. |
-| `getPreviousPrivateKey` | `serverId: string` | `Promise<{ privateKey: Uint8Array } \| null>` | Return the private key that was current immediately before the most recent renewal, or `null` if none is retained. |
-| `commitNewPrivateKey` | `serverId: string`, `newPrivateKey: Uint8Array` | `Promise<void>` | Atomically move the current private key into previous and install `newPrivateKey` as the new current, with `createdAt` set to now. |
+| `getServerPublicKey` | `serverId: string` | `Promise<{ publicKey: Uint8Array, keyType: string } \| null>` | Return the server's public key and its type for this server, or `null` if none is stored. |
+| `getCurrentPrivateKey` | `serverId: string` | `Promise<{ privateKey: Uint8Array, keyType: string, createdAt: number } \| null>` | Return the client's current private key for this server, its `keyType`, and the timestamp in ms where it was installed. Return `null` if no key is stored. |
+| `getPreviousPrivateKey` | `serverId: string` | `Promise<{ privateKey: Uint8Array, keyType: string } \| null>` | Return the private key (and its `keyType`) that was current immediately before the most recent renewal, or `null` if none is retained. |
+| `commitNewPrivateKey` | `serverId: string`, `newKey: { privateKey: Uint8Array, keyType: string }` | `Promise<void>` | Atomically move the current private key into previous and install `newKey` as the new current, with `createdAt` set to now. |
 | `revertToPreviousPrivateKey` | `serverId: string` | `Promise<void>` | Swap previous into current and clear previous. Called when the server reports `DECRYPTION_FAILED`, indicating the two sides fell out of sync during a prior renewal. |
 
-### Class: `Session`
+### Class: `SessionAES256GCM`
 
 Returned by `deriveSessionP256`. Provides AES-256-GCM encryption for use cases outside the request/response flow.
 
@@ -78,7 +78,7 @@ Returned by `deriveSessionP256`. Provides AES-256-GCM encryption for use cases o
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
 | `generateKeypairP256` | — | `Promise<{ publicKey: Uint8Array, privateKey: Uint8Array }>` | Generate a fresh P-256 keypair. `publicKey` is raw uncompressed SEC1 (65 bytes). `privateKey` is PKCS8 DER. |
-| `deriveSessionP256` | `privateKey: Uint8Array`, `publicKey: Uint8Array` | `Promise<Session>` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. `privateKey` is PKCS8 DER, `publicKey` is raw uncompressed SEC1. |
+| `deriveSessionP256` | `privateKey: Uint8Array`, `publicKey: Uint8Array` | `Promise<SessionAES256GCM>` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `SessionAES256GCM` bound to the derived AES key. `privateKey` is PKCS8 DER, `publicKey` is raw uncompressed SEC1. |
 
 ## Go server
 
@@ -117,13 +117,13 @@ Parameter function types:
 
 ### Struct: `KeyStore`
 
-The host populates this struct of function fields and passes it to `NewServer`. The library calls these functions to read and persist key material. All private keys are raw 32-byte scalars, all public keys are raw uncompressed SEC1 (65 bytes).
+The host populates this struct of function fields and passes it to `NewServer`. The library calls these functions to read and persist key material.
 
 | Field | Signature | Expected behavior |
 |---|---|---|
-| `GetPrivateKey` | `func() ([]byte, error)` | Return the server's long-lived private key. One key is shared across all clients. |
-| `GetClientPublicKey` | `func(clientID string) ([]byte, bool)` | Return the current public key for the named client. Return `(nil, false)` if the client is unknown. |
-| `CommitClientPublicKey` | `func(clientID string, newPublicKey []byte) error` | Persist a client's new public key. |
+| `GetPrivateKey` | `func(keyType string) *PrivateKey` | Return the server's long-lived private key of the given type, or `nil` if the server has none. One key per type is shared across all clients. |
+| `GetClientPublicKey` | `func(clientID string) *PublicKey` | Return the current public key and its type for the named client, or `nil` if the client is unknown. |
+| `CommitClientPublicKey` | `func(clientID string, newPublicKey *PublicKey) error` | Persist a client's new public key and its type. |
 
 ### Struct: `ReplayStore`
 
@@ -141,10 +141,28 @@ Returned by `GenerateKeypairP256`.
 
 | Field | Type | Description |
 |---|---|---|
-| `PublicKey` | `[]byte` | Raw uncompressed SEC1 (65 bytes). |
-| `PrivateKey` | `[]byte` | Raw 32-byte scalar. |
+| `PublicKey` | `[]byte` | The raw public key bytes. |
+| `PrivateKey` | `[]byte` | The raw private key bytes. |
 
-### Struct: `Session`
+### Struct: `PrivateKey`
+
+Returned by the host's `GetPrivateKey`.
+
+| Field | Type | Description |
+|---|---|---|
+| `Key` | `[]byte` | The raw private key bytes. |
+| `KeyType` | `string` | Identifies the key's type. |
+
+### Struct: `PublicKey`
+
+Returned by the host's `GetClientPublicKey` and passed to `CommitClientPublicKey`.
+
+| Field | Type | Description |
+|---|---|---|
+| `Key` | `[]byte` | The raw public key bytes. |
+| `KeyType` | `string` | Identifies the key's type. |
+
+### Struct: `SessionAES256GCM`
 
 Provides AES-256-GCM encryption for use cases outside the request/response flow.
 
@@ -157,9 +175,9 @@ Provides AES-256-GCM encryption for use cases outside the request/response flow.
 
 | Function | Parameters | Returns | Description |
 |---|---|---|---|
-| `GenerateKeypairP256` | — | `(*Keypair, error)` | Generate a fresh P-256 keypair (raw bytes). |
-| `DeriveSessionP256` | `privateKey, publicKey []byte` | `(*Session, error)` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `Session` bound to the derived AES key. |
-| `SessionFromKey` | `key []byte` | `(*Session, error)` | Construct an AES-GCM session from a 32-byte key. |
+| `GenerateKeypairP256` | — | `(*Keypair, error)` | Generate a fresh P-256 keypair. `PublicKey` is raw uncompressed SEC1 (65 bytes), `PrivateKey` is a raw 32-byte scalar. |
+| `DeriveSessionP256` | `privateKey, publicKey []byte` | `(*SessionAES256GCM, error)` | Perform ECDH between your private key and the other side's public key, run HKDF-SHA256, and return a `SessionAES256GCM` bound to the derived AES key. |
+| `SessionFromKeyAES256GCM` | `key []byte` | `(*SessionAES256GCM, error)` | Construct an AES-256-GCM session from a 32-byte key. |
 
 ## Tests
 

@@ -20,9 +20,9 @@ func fakeReplayStore() ReplayStore {
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	server, err := NewServer("server", KeyStore{
-		GetPrivateKey:         func() ([]byte, error) { return nil, nil },
-		GetClientPublicKey:    func(string) ([]byte, bool) { return nil, false },
-		CommitClientPublicKey: func(string, []byte) error { return nil },
+		GetPrivateKey:         func(string) *PrivateKey { return nil },
+		GetClientPublicKey:    func(string) *PublicKey { return nil },
+		CommitClientPublicKey: func(string, *PublicKey) error { return nil },
 	}, fakeReplayStore())
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -106,9 +106,16 @@ func TestSessionFromKeyChangesWhenStoredKeyChanges(t *testing.T) {
 	// Mutable store simulating a re-pair flow that swaps the client's public key
 	currentClientPub := firstClient.PublicKey
 	server, err := NewServer("server", KeyStore{
-		GetPrivateKey:         func() ([]byte, error) { return serverKeypair.PrivateKey, nil },
-		GetClientPublicKey:    func(string) ([]byte, bool) { return currentClientPub, true },
-		CommitClientPublicKey: func(string, []byte) error { return nil },
+		GetPrivateKey: func(keyType string) *PrivateKey {
+			switch keyType {
+			case KeyTypeP256:
+				return &PrivateKey{Key: serverKeypair.PrivateKey, KeyType: KeyTypeP256}
+			default:
+				return nil
+			}
+		},
+		GetClientPublicKey:    func(string) *PublicKey { return &PublicKey{Key: currentClientPub, KeyType: KeyTypeP256} },
+		CommitClientPublicKey: func(string, *PublicKey) error { return nil },
 	}, fakeReplayStore())
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -137,9 +144,9 @@ func TestSessionFromKeyChangesWhenStoredKeyChanges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deriveSharedSecretP256: %v", err)
 	}
-	expectedSession, err := SessionFromKey(expectedSecret)
+	expectedSession, err := SessionFromKeyAES256GCM(expectedSecret)
 	if err != nil {
-		t.Fatalf("SessionFromKey: %v", err)
+		t.Fatalf("SessionFromKeyAES256GCM: %v", err)
 	}
 	ciphertext, err := expectedSession.Encrypt([]byte("hello"), nil)
 	if err != nil {
@@ -198,11 +205,18 @@ func TestRenewKeyAckClearsReplayHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GenerateKeypairP256: %v", err)
 	}
-	committed := make(map[string][]byte)
+	committed := make(map[string]*PublicKey)
 	server, err := NewServer("server", KeyStore{
-		GetPrivateKey:         func() ([]byte, error) { return serverKeypair.PrivateKey, nil },
-		GetClientPublicKey:    func(id string) ([]byte, bool) { pub, ok := committed[id]; return pub, ok },
-		CommitClientPublicKey: func(id string, pub []byte) error { committed[id] = pub; return nil },
+		GetPrivateKey: func(keyType string) *PrivateKey {
+			switch keyType {
+			case KeyTypeP256:
+				return &PrivateKey{Key: serverKeypair.PrivateKey, KeyType: KeyTypeP256}
+			default:
+				return nil
+			}
+		},
+		GetClientPublicKey:    func(id string) *PublicKey { return committed[id] },
+		CommitClientPublicKey: func(id string, pub *PublicKey) error { committed[id] = pub; return nil },
 	}, fakeReplayStore())
 	if err != nil {
 		t.Fatalf("NewServer: %v", err)
@@ -223,7 +237,7 @@ func TestRenewKeyAckClearsReplayHistory(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeriveSessionP256: %v", err)
 	}
-	server.keys.bufferPending(clientID, newClientKeypair.PublicKey, newSession)
+	server.keys.bufferPending(clientID, &PublicKey{Key: newClientKeypair.PublicKey, KeyType: KeyTypeP256}, newSession)
 
 	// Build a valid renewKeyAck envelope encrypted under the new session
 	ackPayload, err := cbor.Marshal(map[string]any{"ack": true})
@@ -289,9 +303,9 @@ func TestReplayTrackerRecoversFromTruncatedTail(t *testing.T) {
 func TestClearClientDropsSessionAndReplayHistory(t *testing.T) {
 	store := fakeReplayStore()
 	keyStore := KeyStore{
-		GetPrivateKey:         func() ([]byte, error) { return nil, nil },
-		GetClientPublicKey:    func(string) ([]byte, bool) { return nil, false },
-		CommitClientPublicKey: func(string, []byte) error { return nil },
+		GetPrivateKey:         func(string) *PrivateKey { return nil },
+		GetClientPublicKey:    func(string) *PublicKey { return nil },
+		CommitClientPublicKey: func(string, *PublicKey) error { return nil },
 	}
 
 	first, err := NewServer("server", keyStore, store)

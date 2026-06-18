@@ -50,9 +50,9 @@ func TestSessionRoundtrip(t *testing.T) {
 	a, _ := GenerateKeypairP256()
 	b, _ := GenerateKeypairP256()
 	secret, _ := deriveSharedSecretP256(a.PrivateKey, b.PublicKey)
-	session, err := SessionFromKey(secret)
+	session, err := SessionFromKeyAES256GCM(secret)
 	if err != nil {
-		t.Fatalf("SessionFromKey: %v", err)
+		t.Fatalf("SessionFromKeyAES256GCM: %v", err)
 	}
 
 	plaintext := []byte("hello")
@@ -74,7 +74,7 @@ func TestSessionRoundtrip(t *testing.T) {
 
 func TestSessionUniqueNonces(t *testing.T) {
 	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
-	session, _ := SessionFromKey(secret)
+	session, _ := SessionFromKeyAES256GCM(secret)
 	c1, _ := session.Encrypt([]byte("x"), nil)
 	c2, _ := session.Encrypt([]byte("x"), nil)
 	if bytes.Equal(c1[:12], c2[:12]) {
@@ -84,7 +84,7 @@ func TestSessionUniqueNonces(t *testing.T) {
 
 func TestSessionAADBinding(t *testing.T) {
 	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
-	session, _ := SessionFromKey(secret)
+	session, _ := SessionFromKeyAES256GCM(secret)
 	ciphertext, _ := session.Encrypt([]byte("x"), []byte("aad-a"))
 	if _, err := session.Decrypt(ciphertext, []byte("aad-b")); err == nil {
 		t.Error("decryption must fail with a different AAD")
@@ -93,7 +93,7 @@ func TestSessionAADBinding(t *testing.T) {
 
 func TestSessionTamperedCiphertext(t *testing.T) {
 	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
-	session, _ := SessionFromKey(secret)
+	session, _ := SessionFromKeyAES256GCM(secret)
 	ciphertext, _ := session.Encrypt([]byte("x"), nil)
 	ciphertext[len(ciphertext)-1] ^= 1
 	if _, err := session.Decrypt(ciphertext, nil); err == nil {
@@ -103,7 +103,7 @@ func TestSessionTamperedCiphertext(t *testing.T) {
 
 func TestSessionEmptyPlaintext(t *testing.T) {
 	secret, _ := deriveSharedSecretP256(must(GenerateKeypairP256()).PrivateKey, must(GenerateKeypairP256()).PublicKey)
-	session, _ := SessionFromKey(secret)
+	session, _ := SessionFromKeyAES256GCM(secret)
 	ciphertext, err := session.Encrypt(nil, nil)
 	if err != nil {
 		t.Fatalf("encrypt empty: %v", err)

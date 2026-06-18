@@ -6,22 +6,18 @@ import "github.com/fxamacker/cbor/v2"
 // Decrypts with the OLD session, buffers the proposed new session as "pending",
 // and replies with an empty encrypted success under the OLD session
 func (s *Server) handleRenewKey(env envelope) []byte {
-	clientPub, ok := s.keyStore.GetClientPublicKey(env.OriginID)
-	if !ok {
+	clientPub := s.keyStore.GetClientPublicKey(env.OriginID)
+	if clientPub == nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errNoClientKey)
 	}
-	priv, err := s.keyStore.GetPrivateKey()
-	if err != nil {
+	// The current session uses the server's key matching the client's current key type
+	oldPriv := s.keyStore.GetPrivateKey(clientPub.KeyType)
+	if oldPriv == nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}
-
-	oldSecret, err := deriveSharedSecretP256(priv, clientPub)
-	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
-	}
-	oldSession, err := SessionFromKey(oldSecret)
-	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
+	oldSession, errCode := deriveSession(oldPriv.KeyType, oldPriv.Key, clientPub.Key)
+	if errCode != "" {
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errCode)
 	}
 
 	aad := computeAAD(env.Type, env.OriginID, env.TargetID, env.RequestID)
@@ -37,16 +33,13 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidPayload)
 	}
 
-	newSecret, err := deriveSharedSecretP256(priv, req.NewPublicKey)
-	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
-	}
-	newSession, err := SessionFromKey(newSecret)
-	if err != nil {
-		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInternalError)
+	// Renewal keeps the established type, deriving with it rejects a new key of any other type
+	newSession, errCode := deriveSession(oldPriv.KeyType, oldPriv.Key, req.NewPublicKey)
+	if errCode != "" {
+		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errCode)
 	}
 
-	s.keys.bufferPending(env.OriginID, req.NewPublicKey, newSession)
+	s.keys.bufferPending(env.OriginID, &PublicKey{Key: req.NewPublicKey, KeyType: clientPub.KeyType}, newSession)
 
 	out, err := s.buildEncryptedResponse(env.OriginID, env.Type, nil, env.RequestID, oldSession)
 	if err != nil {

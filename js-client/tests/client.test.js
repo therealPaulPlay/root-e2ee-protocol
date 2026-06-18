@@ -2,7 +2,7 @@ import { describe, test, expect } from "vitest";
 import { Encoder } from "cbor-x";
 import { Client } from "../src/client.js";
 import { generateKeypairP256, deriveSessionP256, computeAAD } from "../src/crypto.js";
-import { PROTOCOL_VERSION } from "../src/constants.js";
+import { PROTOCOL_VERSION, KEY_TYPE_P256 } from "../src/constants.js";
 
 /** @type {import("cbor-x").Options & { int64AsNumber?: boolean }} */
 const cborOptions = { useRecords: false, mapsAsObjects: true, int64AsNumber: true };
@@ -127,9 +127,9 @@ describe("Client push handlers", () => {
 		const client = new Client({
 			selfId: "c",
 			keyStore: {
-				async getServerPublicKey() { return serverKeypair.publicKey; },
+				async getServerPublicKey() { return { publicKey: serverKeypair.publicKey, keyType: KEY_TYPE_P256 }; },
 				async getCurrentPrivateKey() {
-					return { privateKey: clientKeypair.privateKey, createdAt: Date.now() };
+					return { privateKey: clientKeypair.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 };
 				},
 				async getPreviousPrivateKey() { return null; },
 				async commitNewPrivateKey() { },
@@ -156,9 +156,9 @@ describe("Client push handlers", () => {
 		const client = new Client({
 			selfId: "c",
 			keyStore: {
-				async getServerPublicKey() { return state.serverPublicKey; },
+				async getServerPublicKey() { return { publicKey: state.serverPublicKey, keyType: KEY_TYPE_P256 }; },
 				async getCurrentPrivateKey() {
-					return { privateKey: state.privateKey, createdAt: Date.now() };
+					return { privateKey: state.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 };
 				},
 				async getPreviousPrivateKey() { return null; },
 				async commitNewPrivateKey() { },

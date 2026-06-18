@@ -1,4 +1,4 @@
-import { HKDF_INFO } from "./constants.js";
+import { HKDF_INFO, KEY_TYPE_P256 } from "./constants.js";
 
 // P-256 (secp256r1) + HKDF-SHA256 + AES-256-GCM
 // Private key: PKCS8 DER bytes (WebCrypto's native format)
@@ -6,12 +6,12 @@ import { HKDF_INFO } from "./constants.js";
 
 /**
  * @typedef {Object} Keypair
- * @property {Uint8Array} publicKey  Raw uncompressed SEC1 (65 bytes)
- * @property {Uint8Array} privateKey PKCS8 DER
+ * @property {Uint8Array} publicKey  Raw public key bytes
+ * @property {Uint8Array} privateKey Raw private key bytes
  */
 
 /** AES-256-GCM session bound to a shared secret */
-export class Session {
+export class SessionAES256GCM {
 	#key;
 
 	/** @param {CryptoKey} cryptoKey */
@@ -51,7 +51,7 @@ export class Session {
 }
 
 /**
- * Generate a fresh P-256 keypair
+ * Generate a fresh P-256 keypair, public key is raw uncompressed SEC1 (65 bytes), private key is PKCS8 DER
  * @returns {Promise<Keypair>}
  */
 export async function generateKeypairP256() {
@@ -66,10 +66,26 @@ export async function generateKeypairP256() {
 }
 
 /**
- * Derive an AES-GCM Session via ECDH between your private key and the other side's public key
+ * Derive a session from a private key and the other side's public key based on the key type
+ * @param {string} keyType
+ * @param {Uint8Array} privateKey
+ * @param {Uint8Array} publicKey
+ * @returns {Promise<SessionAES256GCM>}
+ */
+export async function deriveSession(keyType, privateKey, publicKey) {
+	switch (keyType) {
+		case KEY_TYPE_P256:
+			return deriveSessionP256(privateKey, publicKey);
+		default:
+			throw new Error(`Unknown key type ${keyType}`);
+	}
+}
+
+/**
+ * Derive an AES-GCM session via ECDH from a private key and the other side's public key
  * @param {Uint8Array} privateKey PKCS8 DER
  * @param {Uint8Array} publicKey Raw uncompressed SEC1 (65 bytes)
- * @returns {Promise<Session>}
+ * @returns {Promise<SessionAES256GCM>}
  */
 export async function deriveSessionP256(privateKey, publicKey) {
 	const priv = await crypto.subtle.importKey(
@@ -109,7 +125,7 @@ export async function deriveSessionP256(privateKey, publicKey) {
 		["encrypt", "decrypt"]
 	);
 
-	return new Session(aesKey);
+	return new SessionAES256GCM(aesKey);
 }
 
 /**

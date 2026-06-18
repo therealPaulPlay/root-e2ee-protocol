@@ -11,8 +11,8 @@ const keyCleanupInterval = 15 * time.Second
 
 // pendingKey is a new key the client proposed but hasn't ACKed yet
 type pendingKey struct {
-	clientPublicKey []byte
-	session         *Session
+	clientPublicKey *PublicKey
+	session         *SessionAES256GCM
 	createdAt       time.Time
 }
 
@@ -61,7 +61,7 @@ func (m *keyManager) cleanup() {
 	}
 }
 
-func (m *keyManager) bufferPending(clientID string, clientPublicKey []byte, session *Session) {
+func (m *keyManager) bufferPending(clientID string, clientPublicKey *PublicKey, session *SessionAES256GCM) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pending[clientID] = &pendingKey{

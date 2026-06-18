@@ -13,24 +13,23 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// HKDF info string shared with the JS client
-const hkdfInfo = "root-privacy-encryption"
+const hkdfInfo = "root-privacy-encryption" // HKDF info string shared with the JS client
+const KeyTypeP256 = "p256"
 
-// Session holds an AES-256-GCM cipher bound to a derived key
-type Session struct {
+// SessionAES256GCM holds an AES-256-GCM cipher bound to a derived key
+type SessionAES256GCM struct {
 	gcm cipher.AEAD
 	mu  sync.Mutex
 }
 
-// Keypair holds raw P-256 public and private key bytes
-// Public key: 65-byte uncompressed SEC1 (0x04 || X || Y)
-// Private key: 32-byte raw scalar
+// Keypair holds raw public and private key bytes
 type Keypair struct {
 	PublicKey  []byte
 	PrivateKey []byte
 }
 
 // GenerateKeypairP256 creates a new P-256 keypair
+// The public key is a 65-byte uncompressed SEC1 point (0x04 || X || Y) and the private key is a 32-byte raw scalar
 func GenerateKeypairP256() (*Keypair, error) {
 	priv, err := ecdh.P256().GenerateKey(rand.Reader)
 	if err != nil {
@@ -42,14 +41,28 @@ func GenerateKeypairP256() (*Keypair, error) {
 	}, nil
 }
 
+// deriveSession derives a session from a private key and a public key based on the key type
+func deriveSession(keyType string, privateKey, publicKey []byte) (*SessionAES256GCM, string) {
+	switch keyType {
+	case KeyTypeP256:
+		session, err := DeriveSessionP256(privateKey, publicKey)
+		if err != nil {
+			return nil, errInvalidKey
+		}
+		return session, ""
+	default:
+		return nil, errUnsupportedKeyType
+	}
+}
+
 // DeriveSessionP256 performs P-256 ECDH between your private key and the other side's public key,
 // runs HKDF-SHA256 over the result, and returns an AES-GCM session bound to the derived key
-func DeriveSessionP256(privateKey, publicKey []byte) (*Session, error) {
+func DeriveSessionP256(privateKey, publicKey []byte) (*SessionAES256GCM, error) {
 	secret, err := deriveSharedSecretP256(privateKey, publicKey)
 	if err != nil {
 		return nil, err
 	}
-	return SessionFromKey(secret)
+	return SessionFromKeyAES256GCM(secret)
 }
 
 // deriveSharedSecretP256 performs P-256 ECDH between your private key and the other side's
@@ -80,8 +93,8 @@ func deriveSharedSecretP256(privateKey, publicKey []byte) ([]byte, error) {
 	return key, nil
 }
 
-// SessionFromKey builds an AES-GCM session from a 32-byte key
-func SessionFromKey(key []byte) (*Session, error) {
+// SessionFromKeyAES256GCM builds an AES-256-GCM session from a 32-byte key
+func SessionFromKeyAES256GCM(key []byte) (*SessionAES256GCM, error) {
 	if len(key) != 32 {
 		return nil, fmt.Errorf("shared secret must be 32 bytes, got %d", len(key))
 	}
@@ -93,11 +106,11 @@ func SessionFromKey(key []byte) (*Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Session{gcm: gcm}, nil
+	return &SessionAES256GCM{gcm: gcm}, nil
 }
 
 // Encrypt produces `nonce(12) || ciphertext || tag(16)`
-func (s *Session) Encrypt(plaintext, aad []byte) ([]byte, error) {
+func (s *SessionAES256GCM) Encrypt(plaintext, aad []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -109,7 +122,7 @@ func (s *Session) Encrypt(plaintext, aad []byte) ([]byte, error) {
 }
 
 // Decrypt consumes `nonce(12) || ciphertext || tag(16)`
-func (s *Session) Decrypt(ciphertext, aad []byte) ([]byte, error) {
+func (s *SessionAES256GCM) Decrypt(ciphertext, aad []byte) ([]byte, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

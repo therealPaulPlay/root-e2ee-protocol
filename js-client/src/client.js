@@ -19,7 +19,7 @@ const cbor = new Encoder(cborOptions);
 
 /**
  * @typedef {Object} PrivateKey
- * @property {Uint8Array} privateKey
+ * @property {Uint8Array} key
  * @property {string} keyType
  */
 
@@ -29,7 +29,7 @@ const cbor = new Encoder(cborOptions);
 
 /**
  * @typedef {Object} PublicKey
- * @property {Uint8Array} publicKey
+ * @property {Uint8Array} key
  * @property {string} keyType
  */
 
@@ -224,7 +224,7 @@ export class Client {
 		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write);
 
 		// Step 2: current key becomes previous, new becomes current, keyType mustn't change
-		await this.#keyStore.commitNewPrivateKey(serverId, { privateKey: newKeypair.privateKey, keyType: current.keyType });
+		await this.#keyStore.commitNewPrivateKey(serverId, { key: newKeypair.privateKey, keyType: current.keyType });
 
 		// Step 3: ACK encrypted with NEW session
 		await this.#exchange(serverId, "renewKeyAck", { ack: true }, write);
@@ -371,13 +371,13 @@ export class Client {
 			// Reuse the cached session only if the key pair (bytes and type) hasn't changed
 			const cached = this.#sessions.get(serverId);
 			if (cached
-				&& cached.privateKey.keyType === privateKey.keyType && bytesEqual(cached.privateKey.privateKey, privateKey.privateKey)
-				&& cached.serverPublicKey.keyType === serverPublicKey.keyType && bytesEqual(cached.serverPublicKey.publicKey, serverPublicKey.publicKey)) {
+				&& cached.privateKey.keyType === privateKey.keyType && bytesEqual(cached.privateKey.key, privateKey.key)
+				&& cached.serverPublicKey.keyType === serverPublicKey.keyType && bytesEqual(cached.serverPublicKey.key, serverPublicKey.key)) {
 				return cached.session;
 			}
 		}
 
-		const session = await deriveSession(privateKey.keyType, privateKey.privateKey, serverPublicKey.publicKey);
+		const session = await deriveSession(privateKey.keyType, privateKey.key, serverPublicKey.key);
 
 		// Do not cache the previous session
 		if (!usePrevious) {

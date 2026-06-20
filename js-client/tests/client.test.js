@@ -127,9 +127,9 @@ describe("Client push handlers", () => {
 		const client = new Client({
 			selfId: "c",
 			keyStore: {
-				async getServerPublicKey() { return { publicKey: serverKeypair.publicKey, keyType: KEY_TYPE_P256 }; },
+				async getServerPublicKey() { return { key: serverKeypair.publicKey, keyType: KEY_TYPE_P256 }; },
 				async getCurrentPrivateKey() {
-					return { privateKey: clientKeypair.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 };
+					return { key: clientKeypair.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 };
 				},
 				async getPreviousPrivateKey() { return null; },
 				async commitNewPrivateKey() { },
@@ -156,9 +156,9 @@ describe("Client push handlers", () => {
 		const client = new Client({
 			selfId: "c",
 			keyStore: {
-				async getServerPublicKey() { return { publicKey: state.serverPublicKey, keyType: KEY_TYPE_P256 }; },
+				async getServerPublicKey() { return { key: state.serverPublicKey, keyType: KEY_TYPE_P256 }; },
 				async getCurrentPrivateKey() {
-					return { privateKey: state.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 };
+					return { key: state.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 };
 				},
 				async getPreviousPrivateKey() { return null; },
 				async commitNewPrivateKey() { },

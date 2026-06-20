@@ -50,14 +50,14 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 	});
 
 	/**
-	 * @typedef {{ privateKey: Uint8Array, createdAt: number, keyType: string }} CurrentKey
-	 * @typedef {{ privateKey: Uint8Array, keyType: string }} PreviousKey
+	 * @typedef {{ key: Uint8Array, createdAt: number, keyType: string }} CurrentKey
+	 * @typedef {{ key: Uint8Array, keyType: string }} PreviousKey
 	 */
 	/** @type {{ serverPublicKey: Uint8Array, current: CurrentKey, previous: PreviousKey | null }} */
 	const keyState = {
 		serverPublicKey: serverKeypair.publicKey,
 		current: {
-			privateKey: clientKeypair.privateKey,
+			key: clientKeypair.privateKey,
 			createdAt: Date.now(),
 			keyType: KEY_TYPE_P256
 		},
@@ -66,20 +66,20 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 
 	// Mock keystore implementation
 	const keyStore = {
-		async getServerPublicKey() { return { publicKey: keyState.serverPublicKey, keyType: KEY_TYPE_P256 }; },
+		async getServerPublicKey() { return { key: keyState.serverPublicKey, keyType: KEY_TYPE_P256 }; },
 		async getCurrentPrivateKey() { return keyState.current; },
 		async getPreviousPrivateKey() { return keyState.previous; },
 		/**
 		 * @param {string} _id
-		 * @param {{ privateKey: Uint8Array, keyType: string }} newKey
+		 * @param {{ key: Uint8Array, keyType: string }} newKey
 		 */
 		async commitNewPrivateKey(_id, newKey) {
-			keyState.previous = { privateKey: keyState.current.privateKey, keyType: keyState.current.keyType };
-			keyState.current = { privateKey: newKey.privateKey, createdAt: Date.now(), keyType: newKey.keyType };
+			keyState.previous = { key: keyState.current.key, keyType: keyState.current.keyType };
+			keyState.current = { key: newKey.key, createdAt: Date.now(), keyType: newKey.keyType };
 		},
 		async revertToPreviousPrivateKey() {
 			if (!keyState.previous) return;
-			keyState.current = { privateKey: keyState.previous.privateKey, createdAt: Date.now(), keyType: KEY_TYPE_P256 }; // Previous key but with new createdAt timestamp
+			keyState.current = { key: keyState.previous.key, createdAt: Date.now(), keyType: KEY_TYPE_P256 }; // Previous key but with new createdAt timestamp
 			keyState.previous = null;
 		}
 	};
@@ -214,16 +214,16 @@ describe("e2e cross-language", () => {
 	test("renews the key and keeps working through multiple renewals", async () => {
 		// keyMaxAgeMs: 0 forces a renewal before every request
 		h = await spawnHarness({ keyMaxAgeMs: 0 });
-		const originalPriv = h.keyState.current.privateKey;
+		const originalPriv = h.keyState.current.key;
 
 		const r1 = await h.client.request("server-1", "echo", { n: 1 }, h.write);
 		expect(r1).toEqual({ n: 1 });
-		expect(h.keyState.current.privateKey).not.toEqual(originalPriv);
-		const afterFirst = h.keyState.current.privateKey;
+		expect(h.keyState.current.key).not.toEqual(originalPriv);
+		const afterFirst = h.keyState.current.key;
 
 		const r2 = await h.client.request("server-1", "echo", { n: 2 }, h.write);
 		expect(r2).toEqual({ n: 2 });
-		expect(h.keyState.current.privateKey).not.toEqual(afterFirst);
+		expect(h.keyState.current.key).not.toEqual(afterFirst);
 
 		const r3 = await h.client.request("server-1", "echo", { n: 3 }, h.write);
 		expect(r3).toEqual({ n: 3 });

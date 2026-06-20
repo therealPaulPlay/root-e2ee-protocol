@@ -6,16 +6,16 @@ import "github.com/fxamacker/cbor/v2"
 // Decrypts with the OLD session, buffers the proposed new session as "pending",
 // and replies with an empty encrypted success under the OLD session
 func (s *Server) handleRenewKey(env envelope) []byte {
-	clientPub := s.keyStore.GetClientPublicKey(env.OriginID)
-	if clientPub == nil {
+	clientPublicKey := s.keyStore.GetClientPublicKey(env.OriginID)
+	if clientPublicKey == nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errNoClientKey)
 	}
 	// The current session uses the server's key matching the client's current key type
-	oldPriv := s.keyStore.GetPrivateKey(clientPub.KeyType)
-	if oldPriv == nil {
+	oldPrivateKey := s.keyStore.GetPrivateKey(clientPublicKey.KeyType)
+	if oldPrivateKey == nil {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errInvalidKey)
 	}
-	oldSession, errCode := deriveSession(oldPriv.KeyType, oldPriv.Key, clientPub.Key)
+	oldSession, errCode := deriveSession(oldPrivateKey.KeyType, oldPrivateKey.Key, clientPublicKey.Key)
 	if errCode != "" {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errCode)
 	}
@@ -34,12 +34,12 @@ func (s *Server) handleRenewKey(env envelope) []byte {
 	}
 
 	// Renewal keeps the established type, deriving with it rejects a new key of any other type
-	newSession, errCode := deriveSession(oldPriv.KeyType, oldPriv.Key, req.NewPublicKey)
+	newSession, errCode := deriveSession(oldPrivateKey.KeyType, oldPrivateKey.Key, req.NewPublicKey)
 	if errCode != "" {
 		return s.buildProtocolError(env.OriginID, env.RequestID, env.Type, errCode)
 	}
 
-	s.keys.bufferPending(env.OriginID, &PublicKey{Key: req.NewPublicKey, KeyType: clientPub.KeyType}, newSession)
+	s.keys.bufferPending(env.OriginID, &PublicKey{Key: req.NewPublicKey, KeyType: clientPublicKey.KeyType}, newSession)
 
 	out, err := s.buildEncryptedResponse(env.OriginID, env.Type, nil, env.RequestID, oldSession)
 	if err != nil {

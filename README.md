@@ -58,10 +58,10 @@ The host implements this interface and passes an instance to the `Client` constr
 
 | Method | Parameters | Returns | Expected behavior |
 |---|---|---|---|
-| `getServerPublicKey` | `serverId: string` | `Promise<{ publicKey: Uint8Array, keyType: string } \| null>` | Return the server's public key and its type for this server, or `null` if none is stored. |
-| `getCurrentPrivateKey` | `serverId: string` | `Promise<{ privateKey: Uint8Array, keyType: string, createdAt: number } \| null>` | Return the client's current private key for this server, its `keyType`, and the timestamp in ms where it was installed. Return `null` if no key is stored. |
-| `getPreviousPrivateKey` | `serverId: string` | `Promise<{ privateKey: Uint8Array, keyType: string } \| null>` | Return the private key (and its `keyType`) that was current immediately before the most recent renewal, or `null` if none is retained. |
-| `commitNewPrivateKey` | `serverId: string`, `newKey: { privateKey: Uint8Array, keyType: string }` | `Promise<void>` | Atomically move the current private key into previous and install `newKey` as the new current, with `createdAt` set to now. |
+| `getServerPublicKey` | `serverId: string` | `Promise<{ key: Uint8Array, keyType: string } \| null>` | Return the server's public key and its type for this server, or `null` if none is stored. |
+| `getCurrentPrivateKey` | `serverId: string` | `Promise<{ key: Uint8Array, keyType: string, createdAt: number } \| null>` | Return the client's current private key for this server, its `keyType`, and the timestamp in ms where it was installed. Return `null` if no key is stored. |
+| `getPreviousPrivateKey` | `serverId: string` | `Promise<{ key: Uint8Array, keyType: string } \| null>` | Return the private key (and its `keyType`) that was current immediately before the most recent renewal, or `null` if none is retained. |
+| `commitNewPrivateKey` | `serverId: string`, `newKey: { key: Uint8Array, keyType: string }` | `Promise<void>` | Atomically move the current private key into previous and install `newKey` as the new current, with `createdAt` set to now. |
 | `revertToPreviousPrivateKey` | `serverId: string` | `Promise<void>` | Swap previous into current and clear previous. Called when the server reports `DECRYPTION_FAILED`, indicating the two sides fell out of sync during a prior renewal. |
 
 ### Class: `SessionAES256GCM`

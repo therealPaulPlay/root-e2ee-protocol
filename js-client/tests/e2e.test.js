@@ -94,13 +94,17 @@ async function spawnHarness({ dropAck = false, keyMaxAgeMs, requestTimeoutMs, on
 	// Create client instance
 	const client = new Client({ selfId: "client-1", keyStore, keyMaxAgeMs, requestTimeoutMs });
 
-	// Connect client to server outbound socket
-	readFrames(sock, (/** @type {Uint8Array} */ bytes) => client.receive(bytes));
+	// Connect client to server outbound socket, tests can swap or add receivers to model several instances
+	/** @type {((bytes: Uint8Array) => void)[]} */
+	const receivers = [(bytes) => client.receive(bytes)];
+	readFrames(sock, (/** @type {Uint8Array} */ bytes) => receivers.forEach((receive) => receive(bytes)));
 
 	return {
 		client,
 		write,
 		keyState,
+		keyStore,
+		receivers,
 		async teardown() {
 			sock.destroy();
 			proc.kill("SIGTERM"); // Kill server process
@@ -241,6 +245,62 @@ describe("e2e cross-language", () => {
 		// -> client reverts to the previous key and retries, so the request still succeeds
 		const response = await h.client.request("server-1", "echo", { hi: true }, h.write);
 		expect(response).toEqual({ hi: true });
+	});
+
+	test("keeps the current key when a forged DECRYPTION_FAILED arrives", async () => {
+		const harness = await spawnHarness();
+		h = harness;
+
+		// One renewal so that a previous key exists
+		harness.keyState.current.createdAt = 0;
+		await harness.client.request("server-1", "echo", { n: 1 }, harness.write);
+		const keyBefore = harness.keyState.current.key;
+
+		// Swallow the request and answer with a plaintext error instead, like anyone on the wire could
+		const forgeError = (/** @type {Uint8Array} */ bytes) => {
+			const env = cbor.decode(bytes);
+			harness.client.receive(cbor.encode({
+				version: PROTOCOL_VERSION,
+				type: env.type,
+				originId: "server-1",
+				targetId: "client-1",
+				requestId: env.requestId,
+				error: "DECRYPTION_FAILED"
+			}));
+		};
+		await expect(harness.client.request("server-1", "echo", { n: 2 }, forgeError))
+			.rejects.toMatchObject({ name: "RelayError", code: "DECRYPTION_FAILED" });
+
+		// The key the server holds must still be in place, so honest traffic keeps working
+		expect(harness.keyState.current.key).toBe(keyBefore);
+		expect(await harness.client.request("server-1", "echo", { n: 3 }, harness.write)).toEqual({ n: 3 });
+	});
+
+	test("stays in sync when two instances sharing a keystore renew at the same time", async () => {
+		const harness = await spawnHarness({ requestTimeoutMs: 1500 });
+		h = harness;
+
+		// Second instance with the same ID and keystore (e.g. another browser tab)
+		// B receives replies later than A, so A's renewal attempt is over before B sees its renewKey reply
+		const clientB = new Client({ selfId: "client-1", keyStore: harness.keyStore, requestTimeoutMs: 1500 });
+		try {
+			const deliverTo = (/** @type {Client} */ c, /** @type {number} */ ms) =>
+				(/** @type {Uint8Array} */ bytes) => { setTimeout(() => c.receive(bytes).catch(() => { }), ms); };
+			harness.receivers.splice(0, 1, deliverTo(harness.client, 20), deliverTo(clientB, 100));
+
+			// Both see the stale key and start a renewal before either hears back
+			harness.keyState.current.createdAt = 0;
+			const results = await Promise.allSettled([
+				harness.client.request("server-1", "echo", { from: "a" }, harness.write),
+				clientB.request("server-1", "echo", { from: "b" }, harness.write)
+			]);
+			expect(results[1]).toEqual({ status: "fulfilled", value: { from: "b" } });
+
+			// Whatever happened to the colliding renewal, the pairing must still work afterwards
+			expect(await harness.client.request("server-1", "echo", { after: true }, harness.write)).toEqual({ after: true });
+		} finally {
+			clientB.close();
+		}
 	});
 
 	test("decrypts in-flight server pushes encrypted with the previous session, then keeps using the new session for subsequent traffic", async () => {

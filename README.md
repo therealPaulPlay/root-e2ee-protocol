@@ -50,7 +50,7 @@ Parameter function types:
 | Type | Signature | Description |
 |---|---|---|
 | `WriteFn` | `(bytes: Uint8Array) => void \| Promise<void>` | Host-provided function that writes envelope bytes onto the wire. Called by the library from inside `request`. |
-| `PushHandler` | `(payload: any, error: RelayError \| null) => void \| Promise<void>` | Registered via `onPush`, fires for server-initiated messages of a given `(serverId, type)`. On protocol errors, `error` is set. |
+| `PushHandler` | `(payload: any, error: Error \| null) => void \| Promise<void>` | Registered via `onPush`, fires for server-initiated messages of a given `(serverId, type)`. On protocol errors, `error` is set. |
 
 ### Type: `KeyStore`
 
@@ -62,7 +62,7 @@ The host implements this interface and passes an instance to the `Client` constr
 | `getCurrentPrivateKey` | `serverId: string` | `Promise<{ key: Uint8Array, keyType: string, createdAt: number } \| null>` | Return the client's current private key for this server, its `keyType`, and the timestamp in ms where it was installed. Return `null` if no key is stored. |
 | `getPreviousPrivateKey` | `serverId: string` | `Promise<{ key: Uint8Array, keyType: string } \| null>` | Return the private key (and its `keyType`) that was current immediately before the most recent renewal, or `null` if none is retained. |
 | `commitNewPrivateKey` | `serverId: string`, `newKey: { key: Uint8Array, keyType: string }` | `Promise<void>` | Atomically move the current private key into previous and install `newKey` as the new current, with `createdAt` set to now. |
-| `revertToPreviousPrivateKey` | `serverId: string` | `Promise<void>` | Swap previous into current and clear previous. Called when the server reports `DECRYPTION_FAILED`, indicating the two sides fell out of sync during a prior renewal. |
+| `revertToPreviousPrivateKey` | `serverId: string` | `Promise<void>` | Swap previous private key into current with `createdAt` set to now and clear previous. Should be a no-op if there is no previous key. Called after the server reported `DECRYPTION_FAILED` and then accepted a retry under the previous key, indicating the two sides fell out of sync during a prior renewal. |
 
 ### Class: `SessionAES256GCM`
 

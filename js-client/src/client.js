@@ -132,7 +132,7 @@ export class Client {
 	/**
 	 * Send an encrypted request and return the decrypted payload
 	 * Triggers a key renewal first if the current key is older than keyMaxAgeMs
-	 * On server-reported decryption failure, reverts to the previous key and retries once
+	 * On server-reported decryption failure, retries once with the previous key and reverts if that succeeds
 	 * Throws {@link RelayError} on protocol-level errors
 	 *
 	 * @param {string} serverId
@@ -223,6 +223,10 @@ export class Client {
 		// Step 1: renewKey encrypted with OLD session
 		await this.#exchange(serverId, "renewKey", { newPublicKey: newKeypair.publicKey }, write);
 
+		// Exit if the private key changed underneath (e.g. step 1's exchange reverted the key, or another session with the same keystore renewed it)
+		const latest = await this.#keyStore.getCurrentPrivateKey(serverId);
+		if (!latest || !bytesEqual(latest.key, current.key)) return;
+
 		// Step 2: current key becomes previous, new becomes current, keyType mustn't change
 		await this.#keyStore.commitNewPrivateKey(serverId, { key: newKeypair.privateKey, keyType: current.keyType });
 
@@ -232,7 +236,7 @@ export class Client {
 
 	/**
 	 * Encrypt, send, await the response
-	 * On a server-reported DECRYPTION_FAILED, reverts to the previous key and retries once
+	 * On a server-reported DECRYPTION_FAILED, retries once with the previous key and reverts to it if the server accepts it
 	 * Resolves with the decoded payload, rejects with {@link RelayError} on protocol errors
 	 *
 	 * @param {string} serverId
@@ -251,8 +255,10 @@ export class Client {
 			const prev = await this.#keyStore.getPreviousPrivateKey(serverId);
 			if (!prev) throw error;
 
+			// If the request succeeds with the previous key, revert to it
+			const response = await this.#roundtrip(serverId, type, payload, write, true);
 			await this.#keyStore.revertToPreviousPrivateKey(serverId);
-			return this.#roundtrip(serverId, type, payload, write);
+			return response;
 		}
 	}
 
@@ -264,11 +270,12 @@ export class Client {
 	 * @param {string} type
 	 * @param {unknown} payload
 	 * @param {WriteFn} write
+	 * @param {boolean} [usePrevious] Use the previous private key
 	 * @returns {Promise<any>}
 	 */
-	async #roundtrip(serverId, type, payload, write) {
+	async #roundtrip(serverId, type, payload, write, usePrevious = false) {
 		const requestId = crypto.randomUUID();
-		const session = await this.#sessionFor(serverId);
+		const session = await this.#sessionFor(serverId, { usePrevious });
 		const aad = await computeAAD(type, this.#selfId, serverId, requestId);
 		const envelope = cbor.encode({
 			version: PROTOCOL_VERSION,
